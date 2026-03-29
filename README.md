@@ -21,37 +21,37 @@ Below are real screenshots of the tool in action:
 **Main Menu**
 
 <p align="center">
-	<img src="images/main_menu_1.png" alt="Main Menu" width="400"/>
+	<img src="images/menu.png" alt="Main Menu" width="400"/>
 </p>
 
 **Main Menu (Exit)**
 
 <p align="center">
-	<img src="images/main_menu_2.png" alt="Main Menu Exit" width="400"/>
+	<img src="images/exit.png" alt="Main Menu Exit" width="400"/>
 </p>
 
 **IPv4 Subnet Calculator**
 
 <p align="center">
-	<img src="images/ipv4_example.png" alt="IPv4 Subnet Calculator" width="500"/>
+	<img src="images/ipv4_cal.png" alt="IPv4 Subnet Calculator" width="500"/>
 </p>
 
 **IPv6 Prefix Calculator**
 
 <p align="center">
-	<img src="images/ipv6_example.png" alt="IPv6 Prefix Calculator" width="500"/>
+	<img src="images/ipv6.png" alt="IPv6 Prefix Calculator" width="500"/>
 </p>
 
 **VLSM Subnet Planner**
 
 <p align="center">
-	<img src="images/vlsm_example.png" alt="VLSM Subnet Planner" width="600"/>
+	<img src="images/VLSM_planner.png" alt="VLSM Subnet Planner" width="600"/>
 </p>
 
 **Subnet Summary Table**
 
 <p align="center">
-	<img src="images/subnet_summary.png" alt="Subnet Summary Table" width="800"/>
+	<img src="images/subnet_table.png" alt="Subnet Summary Table" width="800"/>
 </p>
 
 ---
