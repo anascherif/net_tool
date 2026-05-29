@@ -11,6 +11,29 @@
 - **VLSM Subnet Planner** — Largest-first allocation for efficient address use
 - **EUI-64 Tool** — MAC ↔ IPv6 link-local conversion with step-by-step explanation
 - **Subnet Summary Table** — List all child subnets from a base prefix
+- **ERREETOOL Advanced Toolkit** — Typer-based subcommands for scanning, ports, DNS, ping, traceroute, Wi-Fi, speed test, and diagnostics
+
+---
+
+## 🧰 ERREETOOL (Advanced Toolkit)
+
+ERREETOOL is a professional, command-style toolkit built for advanced networking operations.
+
+**Launch from the main menu:**
+1. Select **[6] ERREETOOL | Advanced Networking Toolkit**
+2. Enter a one-off command (e.g., `scan 192.168.1.0/24`)
+
+**Direct CLI usage:**
+```sh
+python -m erreetool.cli scan 192.168.1.0/24
+python -m erreetool.cli ports 192.168.1.1 --full
+python -m erreetool.cli dns openai.com
+python -m erreetool.cli ping google.com
+python -m erreetool.cli trace google.com
+python -m erreetool.cli wifi
+python -m erreetool.cli speedtest
+python -m erreetool.cli doctor
+```
 
 ---
 
@@ -66,8 +89,8 @@ Below are real screenshots of the tool in action:
 
 1. **Clone this repository:**
    ```sh
-   git clone https://github.com/anascherif/net_tool.git
-   cd net_tool
+   git clone https://github.com/anascherif/ict_tool.git
+   cd ict_tool
    ```
 2. **Set up your environment and run the tool:**
    - Open a terminal in the project folder and run **one** of the following commands:

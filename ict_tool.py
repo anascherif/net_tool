@@ -6,8 +6,9 @@ Targets: Packet Tracer, GNS3, and real Cisco IOS devices.
 
 Author  : Anas abd elmalek cherif
 Requires: colorama, ipaddress (stdlib)
+ERREETOOL: typer, rich, scapy, dnspython, python-nmap, speedtest-cli
 
-Install : pip install colorama
+Install : pip install -r requirements.txt
 Run     : python ict_tool.py
 """
 
@@ -536,12 +537,22 @@ def subnet_summary() -> None:
 #  MENU
 
 
+def erreetool_menu() -> None:
+    _banner("ERREETOOL | Advanced Networking Toolkit")
+    print(f"  {C_INFO}Example:{C_RESET} scan 192.168.1.0/24")
+    print(f"  {C_INFO}Example:{C_RESET} ports 192.168.1.1 --full")
+    command_line = _prompt("ERREETOOL command")
+    from erreetool.cli import run_from_menu as erreetool_run
+    erreetool_run(command_line)
+
+
 MENU_ITEMS = [
     ("1", "IPv4 Subnet Calculator",      ipv4_calc),
     ("2", "IPv6 Prefix Calculator",      ipv6_calc),
     ("3", "VLSM Subnet Planner",         vlsm),
     ("4", "EUI-64  |  MAC <-> Link-Local", eui64_tool),
     ("5", "Subnet Summary Table",        subnet_summary),
+    ("6", "ERREETOOL | Advanced Networking Toolkit", erreetool_menu),
     ("0", "Exit",                        None),
 ]
 
