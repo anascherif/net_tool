@@ -9,3 +9,11 @@
 [AI] Response received (380 chars)
 [SHOW] AI text received, printing
 [SHOW] AI explanation displayed successfully
+[SHOW] command='ping', context=''
+[AI] Key loaded (prefix: sk-or-v1-407ff4...)
+[AI] Request: command='ping', context=''
+[AI] Attempt 1: model=openrouter/free
+[AI] HTTP 200
+[AI] Response received (377 chars)
+[SHOW] AI text received, printing
+[SHOW] AI explanation displayed successfully
