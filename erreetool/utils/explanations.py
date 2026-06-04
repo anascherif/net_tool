@@ -24,25 +24,35 @@ def _get_ai_explanation(command: str, context: str) -> str:
         return ""
     try:
         import httpx
+        import time
         prompt = (
             f"You are a helpful IT Assistant explaining network outputs to a non-technical user.\n"
             f"Command: {command}\nSummary/Output: {context}\n\n"
             "Provide a short, non-technical explanation (2-3 sentences max) of what this means, "
             "and 2 short actionable tips. Avoid jargon."
         )
-        with httpx.Client() as client:
-            resp = client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
-                json={
-                    "model": "poolside/laguna-xs.2:free",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 300,
-                },
-                timeout=12.0
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+        models = ["openrouter/free", "poolside/laguna-xs.2:free"]
+        for attempt, model in enumerate(models):
+            try:
+                with httpx.Client() as client:
+                    resp = client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "max_tokens": 300,
+                        },
+                        timeout=12.0
+                    )
+                    resp.raise_for_status()
+                    text = resp.json()["choices"][0]["message"]["content"]
+                    if text and text.strip():
+                        return text
+            except Exception:
+                if attempt < len(models) - 1:
+                    time.sleep(1)
+        return ""
     except Exception:
         return ""
 
@@ -56,8 +66,8 @@ def show_explanation(command: str, context: str = ""):
             if ai_text and ai_text.strip():
                 console.print(Panel(ai_text, title="[bold yellow]AI Explanation[/bold yellow]"))
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            console.print(f"[dim]AI explanation unavailable: {e}[/dim]")
 
     static_text = load_static_explanation(command)
     console.print(Panel(static_text, title="[bold cyan]Explanation[/bold cyan]"))
