@@ -539,11 +539,19 @@ def subnet_summary() -> None:
 
 def erreetool_menu() -> None:
     _banner("ERREETOOL | Advanced Networking Toolkit")
-    print(f"  {C_INFO}Example:{C_RESET} scan 192.168.1.0/24")
-    print(f"  {C_INFO}Example:{C_RESET} ports 192.168.1.1 --full")
-    command_line = _prompt("ERREETOOL command")
-    from erreetool.cli import run_from_menu as erreetool_run
-    erreetool_run(command_line)
+    from erreetool.cli import run_from_menu as erreetool_run, get_command_list
+    
+    print(f"  {C_INFO}Available ERREETOOL commands:{C_RESET}")
+    for i, (name, desc) in enumerate(get_command_list(), 1):
+        print(f"    [{i}] {name:<10} - {desc}")
+    print()
+    print(f"  {C_INFO}Tip:{C_RESET} Append --explain to any command for a human-friendly explanation!")
+    print(f"  {C_INFO}Example:{C_RESET} scan 192.168.1.0/24 --explain")
+    print(f"  {C_INFO}Example:{C_RESET} 2 192.168.1.1 --full")
+    
+    command_line = _prompt("ERREETOOL command/number")
+    if command_line:
+        erreetool_run(command_line)
 
 
 MENU_ITEMS = [

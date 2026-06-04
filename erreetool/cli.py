@@ -34,6 +34,19 @@ app.command("speedtest")(speedtest.run)
 app.command("doctor")(doctor.run)
 
 
+def get_command_list():
+    return [
+        ("scan", "ARP network scan in CIDR format"),
+        ("ports", "Port scanning with service detection"),
+        ("dns", "DNS record lookup (A/AAAA/MX/TXT/NS)"),
+        ("ping", "ICMP echo test with statistics"),
+        ("trace", "Traceroute to target host"),
+        ("wifi", "Display Wi-Fi/network interface info"),
+        ("speedtest", "Internet bandwidth speed test"),
+        ("doctor", "Diagnostic health check"),
+    ]
+
+
 def run_from_menu(command_line: str) -> None:
     cleaned = command_line.strip()
     if not cleaned:
@@ -41,6 +54,17 @@ def run_from_menu(command_line: str) -> None:
         return
 
     args = shlex.split(cleaned)
+    cmd_list = get_command_list()
+    
+    # Translate numeric choice to command string
+    if args and args[0].isdigit():
+        idx = int(args[0]) - 1
+        if 0 <= idx < len(cmd_list):
+            args[0] = cmd_list[idx][0]
+        else:
+            console.print(Panel(f"[bold red]Invalid option: {args[0]}[/bold red]"))
+            return
+
     command = get_command(app)
     try:
         command.main(args=args, prog_name="erreetool", standalone_mode=False)
