@@ -1,6 +1,7 @@
 import shlex
+import click
 import typer
-from typer.main import get_command
+from typer.main import get_command as _typer_get_command
 from rich.console import Console
 from rich.panel import Panel
 
@@ -32,6 +33,16 @@ app.command("trace")(trace.run)
 app.command("wifi")(wifi.run)
 app.command("speedtest")(speedtest.run)
 app.command("doctor")(doctor.run)
+
+
+def get_command(app):
+    cmd = _typer_get_command(app)
+    if hasattr(cmd, "commands"):
+        for sub in cmd.commands.values():
+            for param in sub.params:
+                if isinstance(param, click.Option) and param.is_flag and param.flag_value is None:
+                    param.flag_value = True
+    return cmd
 
 
 def get_command_list():

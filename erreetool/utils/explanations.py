@@ -1,5 +1,4 @@
 import json
-import asyncio
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
@@ -18,9 +17,9 @@ def load_static_explanation(module_name: str) -> str:
     except Exception as e:
         return f"Error loading explanation: {e}"
 
-async def _get_ai_explanation(command: str, context: str) -> str:
+def _get_ai_explanation(command: str, context: str) -> str:
     from erreetool.config import OPENROUTER_API_KEY
-    
+
     if not OPENROUTER_API_KEY or not OPENROUTER_API_KEY.strip():
         return ""
     try:
@@ -31,12 +30,12 @@ async def _get_ai_explanation(command: str, context: str) -> str:
             "Provide a short, non-technical explanation (2-3 sentences max) of what this means, "
             "and 2 short actionable tips. Avoid jargon."
         )
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
+        with httpx.Client() as client:
+            resp = client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
                 json={
-                    "model": "meta-llama/llama-3-8b-instruct:free",
+                    "model": "poolside/laguna-xs.2:free",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 300,
                 },
@@ -44,23 +43,21 @@ async def _get_ai_explanation(command: str, context: str) -> str:
             )
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]
-    except Exception as e:
+    except Exception:
         return ""
 
 def show_explanation(command: str, context: str = ""):
     from erreetool.config import OPENROUTER_API_KEY
-    
-    # Try AI first if API key is configured
+
     if OPENROUTER_API_KEY and OPENROUTER_API_KEY.strip():
         try:
             console.print("[dim]Fetching AI explanation...[/dim]")
-            ai_text = asyncio.run(_get_ai_explanation(command, context))
+            ai_text = _get_ai_explanation(command, context)
             if ai_text and ai_text.strip():
-                console.print(Panel(ai_text, title="[bold yellow]🤖 AI Explanation[/bold yellow]"))
+                console.print(Panel(ai_text, title="[bold yellow]AI Explanation[/bold yellow]"))
                 return
-        except Exception as e:
-            console.print(f"[dim]AI explanation failed: {e}[/dim]")
-    
-    # Fallback to static explanation
+        except Exception:
+            pass
+
     static_text = load_static_explanation(command)
-    console.print(Panel(static_text, title="[bold cyan]💡 Explanation[/bold cyan]"))
+    console.print(Panel(static_text, title="[bold cyan]Explanation[/bold cyan]"))

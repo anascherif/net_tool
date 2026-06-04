@@ -5,7 +5,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from scapy.all import ARP, Ether, srp
+from scapy.all import ARP, Ether, srp  # type: ignore
 
 from erreetool.utils import is_admin
 
@@ -75,7 +75,3 @@ def run(
     if explain:
         from erreetool.utils.explanations import show_explanation
         show_explanation("scan", f"Scanned {target}")
-    
-    if explain:
-        from erreetool.utils.explanations import show_explanation
-        show_explanation("scan", f"Target: {target}")
