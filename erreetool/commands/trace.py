@@ -26,7 +26,7 @@ def _parse_tracert(output: str) -> list:
 
 def run(
     target: str = typer.Argument(..., help="Target hostname or IP address."),
-    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
+    explain: bool = typer.Option(False, "--explain", is_flag=True, help="Show human-friendly explanation."),
 ) -> None:
     cmd = ["tracert", target] if is_windows() else ["traceroute", target]
     code, stdout, stderr = run_command(cmd)

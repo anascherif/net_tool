@@ -16,7 +16,7 @@ def _extract_value(pattern: str, text: str) -> str:
 
 
 def run(
-    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
+    explain: bool = typer.Option(False, "--explain", is_flag=True, help="Show human-friendly explanation."),
 ) -> None:
     if not is_windows():
         console.print(

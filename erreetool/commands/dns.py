@@ -9,7 +9,7 @@ console = Console()
 
 def run(
     target: str = typer.Argument(..., help="Domain name to resolve."),
-    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
+    explain: bool = typer.Option(False, "--explain", is_flag=True, help="Show human-friendly explanation."),
 ) -> None:
     record_types = ["A", "AAAA", "MX", "TXT", "NS"]
     table = Table(title=f"DNS Lookup: {target}")

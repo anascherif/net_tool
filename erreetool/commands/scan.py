@@ -32,7 +32,7 @@ def _calc_rtt_ms(sent_pkt, recv_pkt) -> Optional[float]:
 def run(
     target: str = typer.Argument(..., help="Target network in CIDR format."),
     timeout: float = typer.Option(2.0, help="ARP response timeout in seconds."),
-    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
+    explain: bool = typer.Option(False, "--explain", is_flag=True, help="Show human-friendly explanation."),
 ) -> None:
     if not is_admin():
         console.print(

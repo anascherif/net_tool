@@ -39,7 +39,7 @@ def _status_label(ok: bool, warn: bool = False) -> Tuple[str, str]:
 
 
 def run(
-    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
+    explain: bool = typer.Option(False, "--explain", is_flag=True, help="Show human-friendly explanation."),
 ) -> None:
     checks: List[Tuple[str, bool, str, bool]] = []
     py_ok = sys.version_info >= (3, 10)

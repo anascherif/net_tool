@@ -548,10 +548,14 @@ def erreetool_menu() -> None:
     print(f"  {C_INFO}Tip:{C_RESET} Append --explain to any command for a human-friendly explanation!")
     print(f"  {C_INFO}Example:{C_RESET} scan 192.168.1.0/24 --explain")
     print(f"  {C_INFO}Example:{C_RESET} 2 192.168.1.1 --full")
+    print()
     
-    command_line = _prompt("ERREETOOL command/number")
-    if command_line:
+    while True:
+        command_line = _prompt("ERREETOOL command/number (or '0' to return)")
+        if command_line == "0" or not command_line:
+            break
         erreetool_run(command_line)
+        print()
 
 
 MENU_ITEMS = [

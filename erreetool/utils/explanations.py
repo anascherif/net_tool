@@ -3,7 +3,6 @@ import asyncio
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
-from erreetool.config import OPENROUTER_API_KEY
 
 console = Console()
 
@@ -20,7 +19,9 @@ def load_static_explanation(module_name: str) -> str:
         return f"Error loading explanation: {e}"
 
 async def _get_ai_explanation(command: str, context: str) -> str:
-    if not OPENROUTER_API_KEY:
+    from erreetool.config import OPENROUTER_API_KEY
+    
+    if not OPENROUTER_API_KEY or not OPENROUTER_API_KEY.strip():
         return ""
     try:
         import httpx
@@ -44,19 +45,22 @@ async def _get_ai_explanation(command: str, context: str) -> str:
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        return f"AI Generation Failed: {e}"
+        return ""
 
 def show_explanation(command: str, context: str = ""):
-    with console.status("[bold green]Generating explanation...[/bold green]"):
-        if OPENROUTER_API_KEY:
-            try:
-                ai_text = asyncio.run(_get_ai_explanation(command, context))
-                if ai_text and not "Failed" in ai_text:
-                    console.print(Panel(ai_text, title="[bold yellow]🤖 AI Explanation[/bold yellow]"))
-                    return
-            except Exception:
-                pass
-        
-        # Fallback to static
-        static_text = load_static_explanation(command)
-        console.print(Panel(static_text, title="[bold cyan]💡 Explanation[/bold cyan]"))
+    from erreetool.config import OPENROUTER_API_KEY
+    
+    # Try AI first if API key is configured
+    if OPENROUTER_API_KEY and OPENROUTER_API_KEY.strip():
+        try:
+            console.print("[dim]Fetching AI explanation...[/dim]")
+            ai_text = asyncio.run(_get_ai_explanation(command, context))
+            if ai_text and ai_text.strip():
+                console.print(Panel(ai_text, title="[bold yellow]🤖 AI Explanation[/bold yellow]"))
+                return
+        except Exception as e:
+            console.print(f"[dim]AI explanation failed: {e}[/dim]")
+    
+    # Fallback to static explanation
+    static_text = load_static_explanation(command)
+    console.print(Panel(static_text, title="[bold cyan]💡 Explanation[/bold cyan]"))

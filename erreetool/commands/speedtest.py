@@ -11,7 +11,7 @@ def _to_mbps(bits_per_second: float) -> str:
 
 
 def run(
-    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
+    explain: bool = typer.Option(False, "--explain", is_flag=True, help="Show human-friendly explanation."),
 ) -> None:
     try:
         import speedtest
