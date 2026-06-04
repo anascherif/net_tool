@@ -26,6 +26,7 @@ def _parse_tracert(output: str) -> list:
 
 def run(
     target: str = typer.Argument(..., help="Target hostname or IP address."),
+    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
 ) -> None:
     cmd = ["tracert", target] if is_windows() else ["traceroute", target]
     code, stdout, stderr = run_command(cmd)
@@ -48,3 +49,7 @@ def run(
         table.add_row(hop, ip, latency)
 
     console.print(table)
+
+    if explain:
+        from erreetool.utils.explanations import show_explanation
+        show_explanation("trace")

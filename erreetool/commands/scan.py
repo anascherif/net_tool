@@ -32,6 +32,7 @@ def _calc_rtt_ms(sent_pkt, recv_pkt) -> Optional[float]:
 def run(
     target: str = typer.Argument(..., help="Target network in CIDR format."),
     timeout: float = typer.Option(2.0, help="ARP response timeout in seconds."),
+    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
 ) -> None:
     if not is_admin():
         console.print(
@@ -70,3 +71,11 @@ def run(
         table.add_row(ip_addr, mac_addr, hostname, rtt_display)
 
     console.print(table)
+
+    if explain:
+        from erreetool.utils.explanations import show_explanation
+        show_explanation("scan", f"Scanned {target}")
+    
+    if explain:
+        from erreetool.utils.explanations import show_explanation
+        show_explanation("scan", f"Target: {target}")

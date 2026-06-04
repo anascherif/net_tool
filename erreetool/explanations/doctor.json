@@ -1,0 +1,9 @@
+{
+    "title": "System Diagnostic Doctor",
+    "description": "The Doctor checks your computer to ensure everything that ERREETOOL needs is installed properly. It verifies your internet connection, your admin permissions, and checks for external helper tools.",
+    "tips": [
+        "If any checks fail, follow the warnings to fix the missing dependencies.",
+        "Some commands like ARP scanning specifically require 'Admin Privileges' to work.",
+        "Make sure Python packages ('requirements.txt') are newly installed if there's a library warning."
+    ]
+}

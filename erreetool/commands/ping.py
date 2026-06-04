@@ -56,6 +56,7 @@ def _parse_unix_ping(output: str) -> dict:
 def run(
     target: str = typer.Argument(..., help="Target hostname or IP address."),
     count: int = typer.Option(4, "--count", "-c", help="Number of echo requests."),
+    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
 ) -> None:
     if is_windows():
         cmd = ["ping", "-n", str(count), "-w", "1000", target]
@@ -86,3 +87,7 @@ def run(
     table.add_row("Maximum Latency (ms)", str(stats.get("max_ms", "-")))
 
     console.print(table)
+
+    if explain:
+        from erreetool.utils.explanations import show_explanation
+        show_explanation("ping")

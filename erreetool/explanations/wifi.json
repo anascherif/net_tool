@@ -1,0 +1,8 @@
+{
+    "title": "Wi-Fi & Interface Information",
+    "description": "This shows the detailed specifics of how you are connected to the network right now. It includes the network name (SSID), your unique IPs, signal strength, and hardware capabilities.",
+    "tips": [
+        "A low signal percentage indicates you should move closer to the router for better speed.",
+        "Check your 'IPv4 Address' if someone needs your IP to connect to your computer locally."
+    ]
+}

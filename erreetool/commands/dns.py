@@ -9,6 +9,7 @@ console = Console()
 
 def run(
     target: str = typer.Argument(..., help="Domain name to resolve."),
+    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
 ) -> None:
     record_types = ["A", "AAAA", "MX", "TXT", "NS"]
     table = Table(title=f"DNS Lookup: {target}")
@@ -36,3 +37,7 @@ def run(
         return
 
     console.print(table)
+
+    if explain:
+        from erreetool.utils.explanations import show_explanation
+        show_explanation("dns")

@@ -1,3 +1,4 @@
+import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -9,7 +10,9 @@ def _to_mbps(bits_per_second: float) -> str:
     return f"{bits_per_second / 1_000_000:.2f} Mbps"
 
 
-def run() -> None:
+def run(
+    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
+) -> None:
     try:
         import speedtest
     except ImportError:
@@ -38,3 +41,7 @@ def run() -> None:
     table.add_row("Server", server)
 
     console.print(table)
+
+    if explain:
+        from erreetool.utils.explanations import show_explanation
+        show_explanation("speedtest")

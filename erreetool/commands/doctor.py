@@ -3,6 +3,7 @@ import socket
 import sys
 from typing import List, Tuple
 import shutil
+import typer
 
 from rich.console import Console
 from rich.table import Table
@@ -37,7 +38,9 @@ def _status_label(ok: bool, warn: bool = False) -> Tuple[str, str]:
     return "FAIL", "red"
 
 
-def run() -> None:
+def run(
+    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
+) -> None:
     checks: List[Tuple[str, bool, str, bool]] = []
     py_ok = sys.version_info >= (3, 10)
     checks.append(("Python >= 3.10", py_ok, sys.version.split()[0], False))
@@ -71,3 +74,7 @@ def run() -> None:
         table.add_row(label, f"[{color}]{status}[/{color}]", details)
 
     console.print(table)
+
+    if explain:
+        from erreetool.utils.explanations import show_explanation
+        show_explanation("doctor")

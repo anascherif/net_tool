@@ -1,0 +1,9 @@
+{
+    "title": "Ping Test",
+    "description": "Ping sends simple 'Hello' messages to another device or website. It checks if the destination is online, if packet pieces got lost on the way, and exactly how many milliseconds it took to get a reply.",
+    "tips": [
+        "If some packets are lost, your internet connection might be weak or unstable.",
+        "If the response time is very high (> 100ms), your connection may feel slow or laggy.",
+        "If nothing responds, the destination might be offline or blocking ping messages."
+    ]
+}

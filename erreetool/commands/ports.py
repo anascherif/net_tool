@@ -80,6 +80,7 @@ def _scan_with_socket(target: str, ports: Iterable[int]) -> List[tuple]:
 def run(
     target: str = typer.Argument(..., help="Target host or IP address."),
     full: bool = typer.Option(False, "--full", help="Scan all ports (1-65535)."),
+    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
 ) -> None:
     console.print(Panel(f"[bold cyan]Port scan for {target}[/bold cyan]"))
 
@@ -113,3 +114,7 @@ def run(
         table.add_row(str(port), service)
 
     console.print(table)
+
+    if explain:
+        from erreetool.utils.explanations import show_explanation
+        show_explanation("ports")

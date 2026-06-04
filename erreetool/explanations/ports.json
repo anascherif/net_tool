@@ -1,0 +1,9 @@
+{
+    "title": "Port Scanning",
+    "description": "Ports are like numbered doors on a computer that allow specific services in and out. For example, door 80 is for websites, and door 443 is for secure websites. A port scan shows which doors are currently open and waiting for connections.",
+    "tips": [
+        "Open ports on public internet IP addresses can be a security risk if not intended.",
+        "If a service (like a web server) isn't working, check if its port is actually open here.",
+        "Ensure your firewall blocks ports you don't need."
+    ]
+}

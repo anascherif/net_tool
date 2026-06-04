@@ -1,0 +1,9 @@
+{
+    "title": "Speed Test",
+    "description": "A speed test measures how quickly you can download data from the internet, and how quickly you can upload data back out. It also tests 'ping', which is the delay in communication.",
+    "tips": [
+        "Compare the 'Download' speed with the plan you pay your provider for.",
+        "Streaming 4K video usually requires at least 25 Mbps of stable download speed.",
+        "If speeds are poor on Wi-Fi, try connecting with an Ethernet cable to see if the Wi-Fi router is the issue."
+    ]
+}

@@ -1,0 +1,9 @@
+{
+    "title": "Network Scan (ARP)",
+    "description": "An ARP scan looks for active physical devices directly connected to your local network. It checks who is currently 'awake' and responding right now. The output lists their IP addresses, unique hardware keys (MAC addresses), and device names.",
+    "tips": [
+        "If you see unknown devices, check if your Wi-Fi password is secure.",
+        "Phones or tablets that are locked/sleeping might not appear to save battery.",
+        "To find a specific sleeping device, wake it up and run the scan again."
+    ]
+}

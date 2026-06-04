@@ -1,0 +1,8 @@
+{
+    "title": "Traceroute (Trace)",
+    "description": "Traceroute shows the exact path a piece of data takes to get from your computer to the target website. It lists every 'hop' (usually a router) along the way and how long the data spent getting there.",
+    "tips": [
+        "If the trace stops halfway or shows stars (*), a router might be blocking traffic or is offline.",
+        "High latency at a specific hop often pinpoints where the network bottleneck is."
+    ]
+}

@@ -1,0 +1,8 @@
+{
+    "title": "DNS Record Lookup",
+    "description": "DNS is like the phonebook of the internet. It translates website names (like example.com) into computer numbers (IP addresses). Different record types do different things: A/AAAA control website paths, MX routes emails, and TXT handles security and verification.",
+    "tips": [
+        "If the 'A' record is missing, the web address won't load in a browser.",
+        "If 'MX' records are wrong, you won't be able to receive emails on that domain."
+    ]
+}

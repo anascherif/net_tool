@@ -1,4 +1,5 @@
 import re
+import typer
 
 from rich.console import Console
 from rich.panel import Panel
@@ -14,7 +15,9 @@ def _extract_value(pattern: str, text: str) -> str:
     return match.group(1).strip() if match else "-"
 
 
-def run() -> None:
+def run(
+    explain: bool = typer.Option(False, "--explain", help="Show human-friendly explanation."),
+) -> None:
     if not is_windows():
         console.print(
             Panel("[bold yellow]Wi-Fi details are currently supported on Windows only.[/bold yellow]")
@@ -55,3 +58,7 @@ def run() -> None:
     table.add_row("MAC Address", mac)
 
     console.print(table)
+
+    if explain:
+        from erreetool.utils.explanations import show_explanation
+        show_explanation("wifi")
