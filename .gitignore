@@ -7,9 +7,8 @@ __pycache__/
 .venv/
 venv/
 ENV/
-.env/
 env/
-
+.env/
 # Test / tooling caches
 .pytest_cache/
 .mypy_cache/
@@ -24,3 +23,4 @@ Thumbs.db
 .vscode/*.log
 .vscode/ipch/
 .vscode/.ropeproject/
+.env
