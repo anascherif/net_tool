@@ -120,6 +120,40 @@ Below are real screenshots of the tool in action:
 
 ---
 
+## 🔮 Upcoming Features
+
+### `assess` — AI-Assisted Vulnerability Triage
+
+A new `assess` subcommand that turns raw recon output into an AI-generated vulnerability report, targeting lab environments such as Metasploitable2 or HackTheBox-style VMs.
+
+**How it works (pipeline):**
+
+1. **Scan** — Runs the existing port scanner (nmap or socket-based) against the target to collect open ports, detected services, and version strings (e.g. `vsftpd 2.3.4`, `Apache 2.4.29`).
+2. **CVE Enrichment** — For each identified service/version, queries the NVD (National Vulnerability Database) public API to find matching known CVEs. Handles rate-limiting with retry/backoff — no API key required.
+3. **Report Compilation** — Aggregates open ports, services, versions, and CVE matches into a structured JSON object.
+4. **AI Triage** — Sends the compiled report to a free LLM via OpenRouter (`openrouter/auto`) with a security-analyst system prompt. The model:
+   - Ranks findings by severity (Critical / High / Medium / Low)
+   - Explains each finding in plain English
+   - Identifies the most likely entry point for further manual exploitation
+5. **Formatted Output** — Prints the LLM's response in a terminal-friendly, scannable format using `rich`.
+
+**Usage:**
+```sh
+python -m erreetool.cli assess 192.168.56.102 --full
+python -m erreetool.cli assess 10.10.10.27 --offline   # skip CVE lookups, demo mode
+python -m erreetool.cli assess 192.168.56.102 --explain # includes AI explanation
+```
+
+**Key design notes:**
+- No API keys required — NVD is free (rate-limited), OpenRouter uses the existing `OPENROUTER_API_KEY` already set in `.env`
+- Private/lab IPs (e.g. `192.168.x.x`, `10.x.x.x`) are automatically handled — CVE lookups still run, IP reputation checks are skipped since they don't apply to private addresses
+- `--offline` flag skips the NVD API calls entirely, sending raw scan results directly to the LLM for demo or environments without internet access
+- All API interactions fail gracefully with clear messages; the scan itself never requires internet
+
+> **Reminder:** Only run `assess` against systems you own or are explicitly authorized to test.
+
+---
+
 ## 🤝 Contributing
 
 Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
