@@ -8,7 +8,6 @@ from typing import Iterable, List, Optional, Tuple
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 console = Console()
@@ -66,34 +65,16 @@ def _scan_with_nmap(target: str, full: bool) -> List[Tuple[int, str, str, str]]:
 def _scan_with_socket(target: str, ports: Iterable[int]) -> List[Tuple[int, str, str, str]]:
     results: List[Tuple[int, str, str, str]] = []
     port_list = list(ports)
-    use_progress = len(port_list) > 20
-
-    if use_progress:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            transient=True,
-            console=console,
-        ) as progress:
-            task = progress.add_task("Scanning ports...", total=len(port_list))
-            for port in port_list:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(0.5)
-                try:
-                    if sock.connect_ex((target, port)) == 0:
-                        results.append((port, _service_name(port), "", ""))
-                finally:
-                    sock.close()
-                progress.advance(task)
-    else:
-        for port in port_list:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.5)
-            try:
-                if sock.connect_ex((target, port)) == 0:
-                    results.append((port, _service_name(port), "", ""))
-            finally:
-                sock.close()
+    
+    console.print(f"[dim]Scanning {len(port_list)} ports...[/dim]")
+    for port in port_list:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        try:
+            if sock.connect_ex((target, port)) == 0:
+                results.append((port, _service_name(port), "", ""))
+        finally:
+            sock.close()
     return results
 
 
@@ -289,10 +270,10 @@ def _llm_triage(report: dict) -> Optional[str]:
 
 def run(
     target: str = typer.Argument(..., help="Target host or IP address."),
-    full: bool = typer.Option(False, "--full", is_flag=True, help="Scan all ports (1-65535)."),
-    quick: bool = typer.Option(False, "--quick", is_flag=True, help="Scan only common ports (fast)."),
-    offline: bool = typer.Option(False, "--offline", is_flag=True, help="Skip NVD CVE lookups."),
-    explain: bool = typer.Option(False, "--explain", is_flag=True, help="Show AI explanation."),
+    full: bool = typer.Option(False, "--full", is_flag=True, flag_value=True, help="Scan all ports (1-65535)."),
+    quick: bool = typer.Option(False, "--quick", is_flag=True, flag_value=True, help="Scan only common ports (fast)."),
+    offline: bool = typer.Option(False, "--offline", is_flag=True, flag_value=True, help="Skip NVD CVE lookups."),
+    explain: bool = typer.Option(False, "--explain", is_flag=True, flag_value=True, help="Show AI explanation."),
 ) -> None:
     console.print(Panel(f"[bold cyan]Security Assessment for {target}[/bold cyan]"))
 
