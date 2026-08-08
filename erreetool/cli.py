@@ -14,6 +14,7 @@ from erreetool.commands import (
     wifi,
     speedtest,
     doctor,
+    assess,
 )
 
 app = typer.Typer(
@@ -33,6 +34,7 @@ app.command("trace")(trace.run)
 app.command("wifi")(wifi.run)
 app.command("speedtest")(speedtest.run)
 app.command("doctor")(doctor.run)
+app.command("assess")(assess.run)
 
 
 def get_command(app):
@@ -55,6 +57,7 @@ def get_command_list():
         ("wifi", "Display Wi-Fi/network interface info"),
         ("speedtest", "Internet bandwidth speed test"),
         ("doctor", "Diagnostic health check"),
+        ("assess", "AI-assisted vulnerability triage report"),
     ]
 
 
