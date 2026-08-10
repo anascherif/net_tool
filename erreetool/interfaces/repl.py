@@ -11,11 +11,10 @@ from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
-from erreetool.agent.state import AgentState, AgentContext
+from erreetool.agent.state import AgentState
 from erreetool.agent.loop import AgentLoop, AgentConfig
 from erreetool.agent.providers import MultiProvider
 

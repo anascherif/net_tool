@@ -205,7 +205,7 @@ def _extract_nmap_facts(state: AgentState, output: str):
 def _extract_nuclei_facts(state: AgentState, output: str):
     """Extract facts from nuclei output."""
     import re
-    for match in re.finditer(r'CVE-\d{4}-\d{4,}', output):
+    for match in re.finditer(r'CVE-\d{4}-\d{4,7}', output):
         state.add_high_signal_fact(f"Vulnerability: {match.group()}")
 
 
@@ -239,28 +239,3 @@ def _show_explanation(state: AgentState):
         show_explanation("assess", f"Assessed {state.context.target}")
     except ImportError:
         console.print("[yellow]Explanation feature not available (requires old explanation system)[/yellow]")
-
-
-# Backward compatibility - old function signature
-def _old_run(
-    target: str,
-    full: bool = False,
-    quick: bool = False,
-    offline: bool = False,
-    explain: bool = False,
-) -> None:
-    """Backward compatible run function."""
-    run(
-        target=target,
-        full=full,
-        quick=quick,
-        offline=offline,
-        interactive=False,
-        explain=explain,
-        max_steps=50 if full else 20,
-        goal=None
-    )
-
-
-# For backward compatibility with existing CLI
-run.__name__ = "run"

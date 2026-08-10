@@ -59,25 +59,33 @@ class CryptoTool:
     def base58_encode(data: str) -> str:
         """Base58 encoding (Bitcoin-style)."""
         alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-        num = int.from_bytes(data.encode(), "big")
+        # Convert string to bytes
+        data_bytes = data.encode()
+        # Count leading zero bytes
+        leading_zeros = len(data_bytes) - len(data_bytes.lstrip(b'\x00'))
+        # Convert to integer
+        num = int.from_bytes(data_bytes, "big")
         if num == 0:
-            return alphabet[0]
+            return alphabet[0] * (leading_zeros + 1)
         result = ""
         while num > 0:
             num, idx = divmod(num, 58)
             result = alphabet[idx] + result
         # Add leading 1s for leading zero bytes
-        leading_zeros = len(data) - len(data.lstrip('\x00'))
         return alphabet[0] * leading_zeros + result
     
     @staticmethod
     def base58_decode(data: str) -> str:
         alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        # Count leading '1' characters (which represent zero bytes)
+        leading_ones = len(data) - len(data.lstrip('1'))
         num = 0
         for char in data:
             num = num * 58 + alphabet.index(char)
         byte_length = (num.bit_length() + 7) // 8
-        return num.to_bytes(byte_length, "big").decode()
+        decoded_bytes = num.to_bytes(byte_length, "big")
+        # Prepend leading zero bytes
+        return (b'\x00' * leading_ones + decoded_bytes).decode()
     
     @staticmethod
     def hex_encode(data: str) -> str:

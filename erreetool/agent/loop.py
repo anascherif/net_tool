@@ -7,7 +7,6 @@ and validates claims against collected evidence.
 
 import json
 import time
-from typing import Optional, Any
 from dataclasses import dataclass
 
 from rich.console import Console
