@@ -15,6 +15,7 @@ from erreetool.commands import (
     speedtest,
     doctor,
     assess,
+    memory,
 )
 
 app = typer.Typer(
@@ -35,6 +36,7 @@ app.command("wifi")(wifi.run)
 app.command("speedtest")(speedtest.run)
 app.command("doctor")(doctor.run)
 app.command("assess")(assess.run)
+app.command("memory")(memory.run)
 
 
 def get_command(app):
@@ -64,6 +66,7 @@ def get_command_list():
         ("speedtest", "Internet bandwidth speed test"),
         ("doctor", "Diagnostic health check"),
         ("assess", "AI-assisted vulnerability triage report"),
+        ("memory", "Manage agent persistent memory"),
     ]
 
 

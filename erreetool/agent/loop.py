@@ -11,6 +11,8 @@ Supports two modes:
 
 import json
 import time
+import re
+import hashlib
 from dataclasses import dataclass
 
 from rich.console import Console
@@ -19,6 +21,7 @@ from erreetool.agent.state import AgentState, AgentContext, EvidenceType, AgentS
 from erreetool.agent.providers import MultiProvider, LLMMessage, TOOL_DEFINITIONS
 from erreetool.agent.tools.base import tool_registry, ToolResult
 from erreetool.agent.skills import SkillExecutor, SkillRegistry, skill_registry
+from erreetool.agent.memory import memory_retriever, RetrievedContext, memory_store, MemoryType, SessionSummary
 
 console = Console()
 
@@ -35,6 +38,9 @@ class AgentConfig:
     skill_mode: bool = False  # If True, run skills instead of LLM loop
     skill_names: str = ""  # Comma-separated skill names to run
     skill_mode_type: str = "auto"  # auto, quick, full
+    # Memory
+    use_memory: bool = True  # Load relevant past sessions
+    memory_max_sessions: int = 5
 
 
 class AgentLoop:
@@ -133,6 +139,9 @@ RULES:
             {"session_id": self.state.session_id}
         )
         
+        # Load relevant memory from past sessions
+        self._load_memory_context(goal)
+        
         # Check if skill mode is enabled
         if self.config.skill_mode:
             return self._run_skills(goal)
@@ -184,6 +193,9 @@ RULES:
         if self.config.evidence_gate_required:
             self._verify_final_claims()
         
+        # Save session to memory for future assessments
+        self._save_session_to_memory()
+        
         # Save final state
         self.state.save()
         return self.state
@@ -223,6 +235,9 @@ RULES:
         if self.provider:
             self._run_final_analysis(goal)
         
+        # Save session to memory for future assessments
+        self._save_session_to_memory()
+        
         # Save final state
         self.state.save()
         return self.state
@@ -261,6 +276,207 @@ RULES:
                 fallback_report,
                 {"fallback": True, "final": True}
             )
+    
+    def _load_memory_context(self, goal: str = None):
+        """Load relevant memory from past sessions."""
+        if not self.config.use_memory:
+            return
+        
+        target = self.state.context.target
+        if not target:
+            return
+        
+        console.print("[dim]Loading relevant memory from past sessions...[/dim]")
+        
+        try:
+            retrieved = memory_retriever.get_context_for_assessment(
+                target=target,
+                state=self.state,
+                max_sessions=self.config.memory_max_sessions,
+            )
+            
+            if retrieved.relevant_sessions or retrieved.finding_patterns:
+                # Add memory summary as evidence
+                self.state.add_evidence(
+                    EvidenceType.OBSERVATION,
+                    "memory",
+                    f"Loaded relevant context:\n{retrieved.summary}",
+                    {
+                        "memory_sessions": len(retrieved.relevant_sessions),
+                        "memory_patterns": len(retrieved.finding_patterns),
+                        "memory_tools": len(retrieved.tool_recommendations),
+                        "memory_cves": len(retrieved.cve_knowledge),
+                    }
+                )
+                
+                # Add key findings from past sessions as high-signal facts
+                for session in retrieved.relevant_sessions[:3]:
+                    for fact in session.critical_findings[:3]:
+                        self.state.add_high_signal_fact(f"[From past session] {fact}")
+                    for fact in session.high_findings[:2]:
+                        self.state.add_high_signal_fact(f"[From past session] {fact}")
+                
+                # Add finding patterns
+                for pattern in retrieved.finding_patterns[:5]:
+                    self.state.add_high_signal_fact(
+                        f"[Pattern] {pattern.description} (seen {pattern.seen_count}x, {pattern.confidence.value})"
+                    )
+                
+                console.print(f"[green]Loaded {len(retrieved.relevant_sessions)} past sessions, {len(retrieved.finding_patterns)} patterns[/green]")
+            else:
+                console.print("[dim]No relevant past sessions found[/dim]")
+                
+        except Exception as e:
+            console.print(f"[yellow]Memory load failed: {e}[/yellow]")
+    
+    def _save_session_to_memory(self):
+        """Save current session summary to memory for future assessments."""
+        if not self.config.use_memory:
+            return
+        
+        try:
+            summary = SessionSummary(
+                session_id=self.state.session_id,
+                target=self.state.context.target,
+                timestamp=self.state.created_at,
+                duration=time.time() - self.state.created_at,
+                skills_run=self.state.context.completed_skills.copy(),
+                tools_used=list(set(
+                    step.tool.replace("run_", "") for step in self.state.steps
+                    if step.tool.startswith("run_")
+                )),
+                high_signal_facts=self.state.context.high_signal_facts.copy(),
+                critical_findings=[
+                    f for f in self.state.context.high_signal_facts
+                    if any(kw in f.lower() for kw in ['critical', 'cve-', 'exploit', 'rce', 'vulnerab'])
+                ],
+                high_findings=[
+                    f for f in self.state.context.high_signal_facts
+                    if any(kw in f.lower() for kw in ['high', 'sql', 'admin', 'credential'])
+                ],
+                recommendations=[],
+                success=len([s for s in self.state.steps if s.status == StepStatus.FAILED]) == 0,
+            )
+            
+            memory_store.add_session_summary(summary)
+            
+            # Also update finding patterns from high-signal facts
+            self._extract_patterns_from_facts()
+            
+            # Update tool effectiveness
+            self._update_tool_effectiveness()
+            
+            console.print(f"[dim]Session saved to memory[/dim]")
+            
+        except Exception as e:
+            console.print(f"[yellow]Memory save failed: {e}[/yellow]")
+    
+    def _extract_patterns_from_facts(self):
+        """Extract and store finding patterns from current session facts."""
+        from erreetool.agent.memory.schema import FindingPattern
+        
+        facts = self.state.context.high_signal_facts
+        
+        # Group facts by type
+        port_facts = [f for f in facts if "port" in f.lower() and "open" in f.lower()]
+        vuln_facts = [f for f in facts if "cve-" in f.lower()]
+        tech_facts = [f for f in facts if any(t in f.lower() for t in ["web server", "cms", "technology"])]
+        
+        if port_facts:
+            pattern = FindingPattern(
+                pattern_id=f"port_pattern_{self.state.session_id}",
+                pattern_type="port",
+                description=f"Common open ports: {', '.join(p.split(':')[-1].strip() for p in port_facts[:5])}",
+                indicators=[p.split(':')[-1].strip() for p in port_facts[:5]],
+                associated_facts=port_facts,
+                seen_count=1,
+                last_seen=time.time(),
+                confidence=ConfidenceLevel.MEDIUM,
+                example_targets=[self.state.context.target],
+                tags=["port", "recon"],
+            )
+            memory_store.add_finding_pattern(pattern)
+        
+        if vuln_facts:
+            for vuln in vuln_facts:
+                cve_match = re.search(r'CVE-\d{4}-\d{4,7}', vuln)
+                if cve_match:
+                    cve_id = cve_match.group()
+                    pattern = FindingPattern(
+                        pattern_id=f"vuln_{cve_id}_{self.state.session_id}",
+                        pattern_type="cve",
+                        description=f"CVE pattern: {cve_id}",
+                        indicators=[cve_id],
+                        associated_facts=[vuln],
+                        seen_count=1,
+                        last_seen=time.time(),
+                        confidence=ConfidenceLevel.HIGH,
+                        example_targets=[self.state.context.target],
+                        tags=["cve", "vuln"],
+                    )
+                    memory_store.add_finding_pattern(pattern)
+        
+        if tech_facts:
+            pattern = FindingPattern(
+                pattern_id=f"tech_pattern_{self.state.session_id}",
+                pattern_type="technology",
+                description=f"Technology stack: {', '.join(tech_facts[:3])}",
+                indicators=[f.split(':')[-1].strip() for f in tech_facts],
+                associated_facts=tech_facts,
+                seen_count=1,
+                last_seen=time.time(),
+                confidence=ConfidenceLevel.MEDIUM,
+                example_targets=[self.state.context.target],
+                tags=["technology", "fingerprint"],
+            )
+            memory_store.add_finding_pattern(pattern)
+    
+    def _update_tool_effectiveness(self):
+        """Update tool effectiveness records from this session."""
+        from erreetool.agent.memory.schema import ToolEffectiveness
+        
+        # Group steps by tool
+        tool_stats = {}
+        for step in self.state.steps:
+            if step.tool.startswith("run_"):
+                tool_name = step.tool.replace("run_", "")
+                if tool_name not in tool_stats:
+                    tool_stats[tool_name] = {"runs": 0, "successes": 0, "findings": 0, "duration": 0.0}
+                tool_stats[tool_name]["runs"] += 1
+                if step.status == StepStatus.COMPLETED:
+                    tool_stats[tool_name]["successes"] += 1
+                    tool_stats[tool_name]["findings"] += len(step.evidence_ids)
+                    tool_stats[tool_name]["duration"] += step.duration
+        
+        # Build context hash
+        context_parts = []
+        for fact in self.state.context.high_signal_facts:
+            fact_lower = fact.lower()
+            if "port" in fact_lower and "open" in fact_lower:
+                match = re.search(r'port\s+(\d+)/tcp\s+open\s+(\w+)', fact_lower)
+                if match:
+                    context_parts.append(f"port:{match.group(1)}:{match.group(2)}")
+            elif "web server" in fact_lower:
+                match = re.search(r'web server:\s+(\w+)', fact_lower)
+                if match:
+                    context_parts.append(f"web:{match.group(1)}")
+        
+        if not context_parts:
+            return
+        
+        context_hash = hashlib.md5("|".join(sorted(context_parts)).encode()).hexdigest()[:16]
+        
+        for tool_name, stats in tool_stats.items():
+            effectiveness = ToolEffectiveness(
+                tool_name=tool_name,
+                context_hash=context_hash,
+                runs=stats["runs"],
+                successes=stats["successes"],
+                findings_generated=stats["findings"],
+                avg_duration=stats["duration"] / stats["runs"] if stats["runs"] > 0 else 0,
+                last_used=time.time(),
+            )
+            memory_store.add_tool_effectiveness(effectiveness)
     
     def _should_stop(self) -> bool:
         """Check if agent should stop."""
