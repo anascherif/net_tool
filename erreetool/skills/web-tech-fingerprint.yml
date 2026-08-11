@@ -1,0 +1,69 @@
+name: web-tech-fingerprint
+description: "Deep web technology fingerprinting with WhatWeb"
+tags: [web, recon, whatweb]
+author: erreetool
+version: "1.0"
+requires_tools: [whatweb]
+
+phases:
+  - name: basic_fingerprint
+    description: "Basic technology fingerprint"
+    steps:
+      - name: whatweb_http
+        tool: whatweb
+        args:
+          target: "http://{target}"
+          aggression: 2
+        save_as: whatweb_http
+        description: "Standard WhatWeb scan"
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)(Apache|nginx|IIS|Tomcat|Jetty)[/\s]([\d.]+)'
+            fact: "Web server: {1} {2}"
+            type: high_signal
+          - pattern: '(?i)(WordPress|Drupal|Joomla|Magento|GitLab|Jenkins|Grafana)[/\s]?([\d.]+)?'
+            fact: "CMS/App: {1} {2}"
+            type: high_signal
+          - pattern: '(?i)(PHP|Ruby|Python|Node\.js|ASP\.NET|JSP)[/\s]?([\d.]+)?'
+            fact: "Language: {1} {2}"
+            type: high_signal
+
+  - name: aggressive_fingerprint
+    description: "Aggressive fingerprint if basic scan found something"
+    condition: "fact_count('Web server*') > 0"
+    steps:
+      - name: whatweb_aggressive
+        tool: whatweb
+        args:
+          target: "http://{target}"
+          aggression: 4
+        save_as: whatweb_aggressive
+        description: "Aggressive WhatWeb scan (level 4)"
+        timeout: 300
+        on_error: skip_phase
+        extract_facts:
+          - pattern: '(?i)(Apache|nginx|IIS|Tomcat)[/\s]([\d.]+)'
+            fact: "Web server: {1} {2}"
+            type: high_signal
+          - pattern: '(?i)(WordPress|Drupal|Joomla)[/\s]?([\d.]+)?'
+            fact: "CMS: {1} {2}"
+            type: high_signal
+
+  - name: https_fingerprint
+    description: "Fingerprint HTTPS service if 443 open"
+    condition: "fact_count('Web server*') > 0"
+    steps:
+      - name: whatweb_https
+        tool: whatweb
+        args:
+          target: "https://{target}"
+          aggression: 2
+        save_as: whatweb_https
+        description: "WhatWeb HTTPS scan"
+        on_error: skip_phase
+
+gates:
+  - name: web_detected
+    condition: "fact_count('Web server*') > 0"
+    on_fail: "No web technology detected"
+    severity: warning

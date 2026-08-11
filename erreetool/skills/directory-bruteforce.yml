@@ -1,0 +1,53 @@
+name: directory-bruteforce
+description: "Directory and file enumeration with Gobuster"
+tags: [web, brute, gobuster]
+author: erreetool
+version: "1.0"
+requires_tools: [gobuster]
+
+phases:
+  - name: http_dirs
+    description: "Enumerate HTTP directories"
+    steps:
+      - name: gobuster_http
+        tool: gobuster
+        args:
+          target: "http://{target}"
+          extensions: "php,html,txt,js,json,bak,old,zip,sql,db"
+          threads: 50
+        save_as: gobuster_http
+        description: "Gobuster HTTP directory brute"
+        timeout: 900
+        on_error: continue
+        extract_facts:
+          - pattern: '(/\S+)\s+\[Status:\s+(\d+)'
+            fact: "Discovered: {1} (status {2})"
+            type: high_signal
+          - pattern: 'Status:\s+200.*?Size:\s+(\d+)'
+            fact: "Accessible resource (200): {0}"
+            type: high_signal
+
+  - name: https_dirs
+    description: "Enumerate HTTPS directories"
+    condition: "fact_count('Discovered*') > 0"
+    steps:
+      - name: gobuster_https
+        tool: gobuster
+        args:
+          target: "https://{target}"
+          extensions: "php,html,txt,js,json,bak,old,zip"
+          threads: 50
+        save_as: gobuster_https
+        description: "Gobuster HTTPS directory brute"
+        timeout: 900
+        on_error: skip_phase
+        extract_facts:
+          - pattern: '(/\S+)\s+\[Status:\s+(\d+)'
+            fact: "Discovered: {1} (status {2})"
+            type: high_signal
+
+gates:
+  - name: dirs_discovered
+    condition: "fact_count('Discovered*') > 0"
+    on_fail: "No directories/files discovered - wordlist may be inadequate or target may filter"
+    severity: info

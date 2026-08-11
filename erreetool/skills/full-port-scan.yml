@@ -1,0 +1,68 @@
+name: full-port-scan
+description: "Comprehensive all-port scan with NSE vulnerability scripts"
+tags: [recon, nmap, network, full]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap]
+
+phases:
+  - name: full_port_scan
+    description: "Scan all 65535 TCP ports"
+    steps:
+      - name: scan_all_ports
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "all"
+          service_detection: true
+        save_as: nmap_full_result
+        description: "Full TCP port scan (all ports)"
+        timeout: 900
+        on_error: continue
+        extract_facts:
+          - pattern: '(\d+)/tcp\s+open\s+(\S+)'
+            fact: "Port {1}/tcp open: {2}"
+            type: high_signal
+
+  - name: vuln_scripts
+    description: "Run NSE vuln scripts on discovered ports"
+    condition: "fact_count('Port *') > 0"
+    steps:
+      - name: run_vuln_nse
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "top-1000"
+          service_detection: true
+        save_as: nmap_vuln_result
+        description: "Run NSE vulnerability scripts"
+        timeout: 600
+        on_error: skip_phase
+        extract_facts:
+          - pattern: 'CVE-\d{4}-\d{4,7}'
+            fact: "Vulnerability: {0}"
+            type: high_signal
+
+  - name: service_version_scan
+    description: "Detect service versions for vulnerability matching"
+    condition: "fact_count('Port *') > 0"
+    steps:
+      - name: version_detection
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "top-100"
+          service_detection: true
+        save_as: nmap_version_result
+        description: "Version detection scan"
+        on_error: skip_phase
+
+gates:
+  - name: ports_discovered
+    condition: "fact_count('Port *') > 0"
+    on_fail: "No open ports found in full scan"
+    severity: warning
+  - name: vulns_checked
+    condition: "len(facts) > 0"
+    on_fail: "No vulnerabilities discovered - target appears patched"
+    severity: info

@@ -1,0 +1,74 @@
+name: smb-enumeration
+description: "SMB share and user enumeration via nmap NSE scripts"
+tags: [smb, enum, nmap, network]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap]
+
+phases:
+  - name: check_smb
+    description: "Verify SMB is running on target (port 445)"
+    steps:
+      - name: quick_port_check
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "445,139"
+          service_detection: true
+        save_as: smb_port_check
+        description: "Check SMB ports 445/139"
+        on_error: abort
+        extract_facts:
+          - pattern: '445/tcp\s+open\s+(\S+)'
+            fact: "Port 445/tcp open: {1}"
+            type: high_signal
+          - pattern: '139/tcp\s+open\s+(\S+)'
+            fact: "Port 139/tcp open: {1}"
+            type: high_signal
+
+  - name: enum_shares
+    description: "Enumerate SMB shares via NSE"
+    condition: "has_fact('445/tcp') or has_fact('Port 445')"
+    steps:
+      - name: smb_enum_shares
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "445"
+          service_detection: true
+        save_as: smb_shares
+        description: "SMB share enumeration via NSE"
+        timeout: 300
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)share:\s+(\S+)'
+            fact: "SMB share: {1}"
+            type: high_signal
+          - pattern: '(?i)(read|write|execute)\s+access'
+            fact: "SMB access: {0}"
+            type: high_signal
+
+  - name: enum_users
+    description: "Enumerate SMB users via NSE"
+    condition: "has_fact('445/tcp') or has_fact('Port 445')"
+    steps:
+      - name: smb_enum_users
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "445"
+          service_detection: true
+        save_as: smb_users
+        description: "SMB user enumeration via NSE"
+        timeout: 300
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)user:\s+(\S+)'
+            fact: "SMB user: {1}"
+            type: high_signal
+
+gates:
+  - name: smb_running
+    condition: "has_fact('445/tcp') or has_fact('Port 445')"
+    on_fail: "SMB not detected (port 445 closed) - skipping SMB enumeration"
+    severity: warning

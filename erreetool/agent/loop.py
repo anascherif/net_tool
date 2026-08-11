@@ -3,6 +3,10 @@ Autonomous agent loop with evidence gates and anti-hallucination.
 
 The agent decides next actions based on context, executes tools,
 and validates claims against collected evidence.
+
+Supports two modes:
+- LLM-driven (default): LLM decides tool calls
+- Skill-driven: Executes structured YAML skills deterministically
 """
 
 import json
@@ -14,6 +18,7 @@ from rich.console import Console
 from erreetool.agent.state import AgentState, AgentContext, EvidenceType, AgentStep, StepStatus
 from erreetool.agent.providers import MultiProvider, LLMMessage, TOOL_DEFINITIONS
 from erreetool.agent.tools.base import tool_registry, ToolResult
+from erreetool.agent.skills import SkillExecutor, SkillRegistry, skill_registry
 
 console = Console()
 
@@ -26,6 +31,10 @@ class AgentConfig:
     evidence_gate_required: bool = True
     show_reasoning: bool = True
     auto_report: bool = True
+    # Skill mode
+    skill_mode: bool = False  # If True, run skills instead of LLM loop
+    skill_names: str = ""  # Comma-separated skill names to run
+    skill_mode_type: str = "auto"  # auto, quick, full
 
 
 class AgentLoop:
@@ -94,6 +103,22 @@ RULES:
             "run_crypto": self._exec_crypto,
             "run_shell": self._exec_shell,
         }
+        
+        # Skill executor (lazy init)
+        self._skill_executor = None
+        self._skill_registry = None
+    
+    @property
+    def skill_executor(self):
+        if self._skill_executor is None:
+            self._skill_executor = SkillExecutor(self.state)
+        return self._skill_executor
+    
+    @property
+    def skill_registry(self):
+        if self._skill_registry is None:
+            self._skill_registry = SkillRegistry()
+        return self._skill_registry
     
     def run(self, goal: str = None) -> AgentState:
         """Run the autonomous agent loop."""
@@ -108,6 +133,11 @@ RULES:
             {"session_id": self.state.session_id}
         )
         
+        # Check if skill mode is enabled
+        if self.config.skill_mode:
+            return self._run_skills(goal)
+        
+        # Otherwise, run the LLM-driven loop
         while not self._should_stop():
             self.step_count += 1
             
@@ -157,6 +187,80 @@ RULES:
         # Save final state
         self.state.save()
         return self.state
+    
+    def _run_skills(self, goal: str = None) -> AgentState:
+        """Run skill-driven assessment."""
+        console.print(f"[cyan]Skill-driven mode:[/cyan] {self.config.skill_mode_type}")
+        
+        # Select skills
+        skills = self.skill_registry.select_skills(
+            self.state,
+            mode=self.config.skill_mode_type,
+            requested=self.config.skill_names,
+        )
+        
+        if not skills:
+            console.print("[yellow]No skills selected. Run with --list-skills to see available.[/yellow]")
+            self.state.save()
+            return self.state
+        
+        console.print(f"[cyan]Selected {len(skills)} skill(s):[/cyan] " + ", ".join(s.name for s in skills))
+        
+        # Run skills
+        results = self.skill_registry.run_skills(skills, self.state)
+        
+        # Summarize
+        successful = sum(1 for r in results if r.success)
+        total = len(results)
+        console.print(f"[cyan]Skill execution complete:[/cyan] {successful}/{total} successful")
+        
+        # Run final gates if LLM is available
+        if self.provider and self.config.evidence_gate_required:
+            console.print("[dim]Running final evidence gate...[/dim]")
+            self._verify_final_claims()
+        
+        # Generate final analysis if LLM available
+        if self.provider:
+            self._run_final_analysis(goal)
+        
+        # Save final state
+        self.state.save()
+        return self.state
+    
+    def _run_final_analysis(self, goal: str = None):
+        """Run final LLM analysis of collected evidence."""
+        messages = [
+            LLMMessage(role="system", content=self.SYSTEM_PROMPT),
+            LLMMessage(
+                role="user",
+                content=f"FINAL ANALYSIS REQUESTED\n\nGoal: {goal or 'Full penetration test'}\n"
+                f"Target: {self.state.context.target}\n"
+                f"Skills completed: {len(self.state.context.completed_skills)}\n"
+                f"High-signal facts: {len(self.state.context.high_signal_facts)}\n\n"
+                f"EVIDENCE PREVIEW:\n{self.state.get_high_signal_preview()}\n\n"
+                "Provide a final vulnerability triage report. Mark with 'FINAL' prefix."
+            )
+        ]
+        
+        try:
+            response = self.provider.chat(
+                messages,
+                temperature=0.3,
+                max_tokens=4000,
+                tools=None,
+                tool_choice="none"
+            )
+            if response.content:
+                self._process_final_response(response.content)
+        except Exception as e:
+            console.print(f"[yellow]Final analysis failed: {e}[/yellow]")
+            fallback_report = self._fallback_analysis()
+            self.state.add_evidence(
+                EvidenceType.LLM_REASONING,
+                "agent",
+                fallback_report,
+                {"fallback": True, "final": True}
+            )
     
     def _should_stop(self) -> bool:
         """Check if agent should stop."""

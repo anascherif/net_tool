@@ -1,0 +1,66 @@
+name: crypto-analysis
+description: "Auto-decode, hash identification, and JWT analysis"
+tags: [crypto, decode, quick]
+author: erreetool
+version: "1.0"
+requires_tools: [crypto]
+
+phases:
+  - name: auto_decode
+    description: "Auto-detect and decode encoded strings"
+    steps:
+      - name: auto_decode
+        tool: crypto
+        args:
+          operation: auto_decode
+          data: "{target}"
+        save_as: crypto_autodecode
+        description: "Auto-decode target (treated as encoded string)"
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)(base64|base32|hex|url|jwt|morse)\s*decoded'
+            fact: "Decodable as: {1}"
+            type: high_signal
+
+  - name: hash_identify
+    description: "Attempt hash identification on target string"
+    condition: "True"
+    steps:
+      - name: identify_hash
+        tool: crypto
+        args:
+          operation: identify_hash
+          data: "{target}"
+        save_as: crypto_hash_id
+        description: "Identify hash type"
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)hash\s+type:\s+(\S+)'
+            fact: "Hash type: {1}"
+            type: high_signal
+
+  - name: jwt_decode
+    description: "Try JWT decode if string looks like JWT"
+    condition: "True"
+    steps:
+      - name: jwt_decode
+        tool: crypto
+        args:
+          operation: jwt_decode
+          data: "{target}"
+        save_as: crypto_jwt
+        description: "Decode JWT token"
+        on_error: skip_phase
+        extract_facts:
+          - pattern: '"alg":\s*"(\w+)"'
+            fact: "JWT algorithm: {1}"
+            type: high_signal
+          - pattern: '"sub":\s*"([^"]+)"'
+            fact: "JWT subject: {1}"
+            type: high_signal
+
+gates:
+  - name: decoded
+    condition: "fact_count('Decodable*') > 0 or fact_count('Hash type*') > 0"
+    on_fail: "No encoded/hash strings detected in target"
+    severity: info

@@ -126,6 +126,8 @@ class AgentContext:
     findings: dict = field(default_factory=dict)  # Structured findings
     high_signal_facts: list[str] = field(default_factory=list)  # Fixed facts
     completed_skills: list[str] = field(default_factory=list)
+    failed_skills: list[str] = field(default_factory=list)
+    skill_history: list[dict] = field(default_factory=list)
     current_phase: str = "recon"
     
     def to_dict(self) -> dict:
@@ -272,6 +274,18 @@ class AgentState:
         if fact not in self.context.high_signal_facts:
             self.context.high_signal_facts.append(fact)
             self.updated_at = time.time()
+
+    def mark_skill_failed(self, skill_name: str, error: str = ""):
+        """Record a skill execution failure."""
+        if skill_name not in self.context.failed_skills:
+            self.context.failed_skills.append(skill_name)
+            self.updated_at = time.time()
+        if error:
+            self.context.skill_history.append({
+                "skill_name": skill_name,
+                "success": False,
+                "error": error,
+            })
     
     def verify_claim(self, claim: str, min_matches: int = 1) -> tuple[bool, list[Evidence]]:
         """

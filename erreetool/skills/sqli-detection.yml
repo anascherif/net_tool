@@ -1,0 +1,59 @@
+name: sqli-detection
+description: "SQL injection detection with SQLMap"
+tags: [web, sqli, sqlmap]
+author: erreetool
+version: "1.0"
+requires_tools: [sqlmap]
+
+phases:
+  - name: basic_sqli
+    description: "Basic SQLi test (risk=1, level=1)"
+    steps:
+      - name: sqlmap_basic
+        tool: sqlmap
+        args:
+          url: "http://{target}"
+          risk: 1
+          level: 1
+        save_as: sqlmap_basic
+        description: "Basic SQLMap test"
+        timeout: 600
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)(injectable|vulnerable|sql injection)'
+            fact: "SQLi detected: {0}"
+            type: high_signal
+          - pattern: '(?i)parameter:\s+(\S+)'
+            fact: "Vulnerable parameter: {1}"
+            type: high_signal
+          - pattern: '(?i)(MySQL|PostgreSQL|MSSQL|Oracle|SQLite)'
+            fact: "Backend DBMS: {1}"
+            type: high_signal
+
+  - name: aggressive_sqli
+    description: "More aggressive SQLi test if basic test found something"
+    condition: "fact_count('SQLi*') > 0"
+    steps:
+      - name: sqlmap_aggressive
+        tool: sqlmap
+        args:
+          url: "http://{target}"
+          risk: 2
+          level: 3
+        save_as: sqlmap_aggressive
+        description: "Aggressive SQLMap test (risk=2, level=3)"
+        timeout: 900
+        on_error: skip_phase
+        extract_facts:
+          - pattern: '(?i)database:\s+(\S+)'
+            fact: "Database: {1}"
+            type: high_signal
+          - pattern: '(?i)table:\s+(\S+)'
+            fact: "Table: {1}"
+            type: high_signal
+
+gates:
+  - name: sqli_checked
+    condition: "True"
+    on_fail: "SQLi scan did not complete"
+    severity: info

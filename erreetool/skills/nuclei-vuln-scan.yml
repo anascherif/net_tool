@@ -1,0 +1,63 @@
+name: nuclei-vuln-scan
+description: "Run nuclei vulnerability scanner across all templates"
+tags: [vuln, scan, nuclei]
+author: erreetool
+version: "1.0"
+requires_tools: [nuclei]
+
+phases:
+  - name: full_vuln_scan
+    description: "Run nuclei with all templates on target"
+    steps:
+      - name: nuclei_http
+        tool: nuclei
+        args:
+          target: "http://{target}"
+        save_as: nuclei_http
+        description: "Nuclei scan on HTTP"
+        timeout: 900
+        on_error: continue
+        extract_facts:
+          - pattern: 'CVE-\d{4}-\d{4,7}'
+            fact: "Vulnerability: {0}"
+            type: high_signal
+          - pattern: '\[(critical|high)\]'
+            fact: "Nuclei {1} finding"
+            type: high_signal
+
+      - name: nuclei_https
+        tool: nuclei
+        args:
+          target: "https://{target}"
+        save_as: nuclei_https
+        description: "Nuclei scan on HTTPS"
+        timeout: 900
+        on_error: skip_phase
+        extract_facts:
+          - pattern: 'CVE-\d{4}-\d{4,7}'
+            fact: "Vulnerability: {0}"
+            type: high_signal
+
+  - name: targeted_scans
+    description: "Run more aggressive template tags if initial scan found issues"
+    condition: "fact_count('Vulnerability*') > 0"
+    steps:
+      - name: cve_scan
+        tool: nuclei
+        args:
+          target: "http://{target}"
+          tags: "cve"
+        save_as: nuclei_cve
+        description: "Nuclei CVE-tagged templates"
+        timeout: 600
+        on_error: skip_phase
+        extract_facts:
+          - pattern: 'CVE-\d{4}-\d{4,7}'
+            fact: "Vulnerability: {0}"
+            type: high_signal
+
+gates:
+  - name: scan_completed
+    condition: "True"
+    on_fail: "Scan did not complete"
+    severity: info

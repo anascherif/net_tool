@@ -1,0 +1,81 @@
+name: web-enumeration
+description: "Web tech fingerprinting + directory brute + vuln scan"
+tags: [web, enum, whatweb, gobuster, nuclei]
+author: erreetool
+version: "1.0"
+requires_tools: [whatweb, gobuster, nuclei]
+
+phases:
+  - name: tech_fingerprint
+    description: "Identify web technologies (server, CMS, frameworks)"
+    steps:
+      - name: whatweb_http
+        tool: whatweb
+        args:
+          target: "http://{target}"
+          aggression: 2
+        save_as: whatweb_http
+        description: "Fingerprint HTTP service"
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)(Apache|nginx|IIS|Tomcat)[/\s]([\d.]+)'
+            fact: "Web server: {1} {2}"
+            type: high_signal
+          - pattern: '(?i)(WordPress|Drupal|Joomla|Magento|GitLab)[/\s]?([\d.]+)?'
+            fact: "CMS: {1} {2}"
+            type: high_signal
+
+      - name: whatweb_https
+        tool: whatweb
+        args:
+          target: "https://{target}"
+          aggression: 2
+        save_as: whatweb_https
+        description: "Fingerprint HTTPS service"
+        on_error: skip_phase
+
+  - name: directory_brute
+    description: "Enumerate directories and files"
+    condition: "len(facts) > 0"
+    steps:
+      - name: gobuster_dirs
+        tool: gobuster
+        args:
+          target: "http://{target}"
+          extensions: "php,html,txt,js,json,bak,old,zip"
+          threads: 50
+        save_as: gobuster_result
+        description: "Directory brute-force"
+        timeout: 600
+        on_error: continue
+        extract_facts:
+          - pattern: '(/\S+)\s+\[Status:\s+(\d+)'
+            fact: "Discovered: {1} (status {2})"
+            type: high_signal
+
+  - name: vuln_scan
+    description: "Run nuclei vulnerability templates"
+    condition: "len(facts) > 0"
+    steps:
+      - name: nuclei_scan
+        tool: nuclei
+        args:
+          target: "http://{target}"
+          severity: "critical,high,medium"
+        save_as: nuclei_result
+        description: "Nuclei vulnerability scan"
+        timeout: 900
+        on_error: continue
+        extract_facts:
+          - pattern: 'CVE-\d{4}-\d{4,7}'
+            fact: "Vulnerability: {0}"
+            type: high_signal
+          - pattern: '\[(critical|high)\]'
+            fact: "High-severity finding: {0}"
+            type: high_signal
+
+gates:
+  - name: web_detected
+    condition: "fact_count('Web server*') > 0 or fact_count('CMS*') > 0"
+    on_fail: "No web technologies detected - target may not have a web service"
+    severity: warning

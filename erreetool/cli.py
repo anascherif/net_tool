@@ -42,8 +42,14 @@ def get_command(app):
     if hasattr(cmd, "commands"):
         for sub in cmd.commands.values():
             for param in sub.params:
-                if isinstance(param, click.Option) and param.is_flag and param.flag_value is None:
-                    param.flag_value = True
+                if isinstance(param, click.Option) and param.is_flag:
+                    # Fix for Click 8.1+ / Typer 0.12.3 compatibility
+                    if param.flag_value is None:
+                        param.flag_value = True
+                    # Also handle case where flag_value is not set
+                    elif param.flag_value is True:
+                        # Already set, nothing to do
+                        pass
     return cmd
 
 

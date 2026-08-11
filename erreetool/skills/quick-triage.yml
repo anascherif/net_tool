@@ -1,0 +1,74 @@
+name: quick-triage
+description: "Quick end-to-end triage: nmap -> whatweb -> nuclei"
+tags: [quick, triage, full-pipeline]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap, whatweb, nuclei]
+
+phases:
+  - name: quick_port_scan
+    description: "Fast port scan (top 100)"
+    steps:
+      - name: nmap_top100
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "top-100"
+          service_detection: true
+        save_as: nmap_quick
+        description: "Top-100 port scan"
+        timeout: 120
+        on_error: continue
+        extract_facts:
+          - pattern: '(\d+)/tcp\s+open\s+(\S+)'
+            fact: "Port {1}/tcp open: {2}"
+            type: high_signal
+
+  - name: web_check
+    description: "Quick web fingerprint if HTTP/HTTPS port open"
+    condition: "has_fact('80/tcp') or has_fact('443/tcp') or has_fact('8080/tcp')"
+    steps:
+      - name: whatweb_quick
+        tool: whatweb
+        args:
+          target: "http://{target}"
+          aggression: 1
+        save_as: whatweb_quick
+        description: "Quick web fingerprint"
+        timeout: 120
+        on_error: skip_phase
+        extract_facts:
+          - pattern: '(?i)(Apache|nginx|IIS)[/\s]([\d.]+)'
+            fact: "Web server: {1} {2}"
+            type: high_signal
+          - pattern: '(?i)(WordPress|Drupal|Joomla)[/\s]?([\d.]+)?'
+            fact: "CMS: {1} {2}"
+            type: high_signal
+
+  - name: quick_vuln_scan
+    description: "Nuclei scan for critical/high vulns only"
+    condition: "fact_count('Port *') > 0"
+    steps:
+      - name: nuclei_critical
+        tool: nuclei
+        args:
+          target: "http://{target}"
+          severity: "critical,high"
+        save_as: nuclei_quick
+        description: "Nuclei critical/high only"
+        timeout: 300
+        on_error: skip_phase
+        extract_facts:
+          - pattern: 'CVE-\d{4}-\d{4,7}'
+            fact: "Vulnerability: {0}"
+            type: high_signal
+
+gates:
+  - name: scan_done
+    condition: "fact_count('Port *') > 0"
+    on_fail: "No open ports found - target may be down or firewalled"
+    severity: warning
+  - name: web_detected
+    condition: "fact_count('Web server*') > 0 or fact_count('CMS*') > 0"
+    on_fail: "No web technology detected (may not have web service)"
+    severity: info

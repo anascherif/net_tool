@@ -2,6 +2,7 @@
 Assess command - AI-assisted vulnerability triage using autonomous agent.
 
 New implementation using the agent loop with evidence-based reasoning.
+Supports both LLM-driven and skill-driven modes.
 """
 
 import typer
@@ -13,22 +14,25 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from erreetool.agent.state import AgentState
 from erreetool.agent.loop import AgentLoop, AgentConfig
 from erreetool.agent.providers import MultiProvider
+from erreetool.agent.skills import skill_registry
 from erreetool.reporting.generator import ReportGenerator
-
 console = Console()
 
 # Only scan systems you own or are explicitly authorized to test.
 
 
 def run(
-    target: str = typer.Argument(..., help="Target host or IP address."),
-    full: bool = typer.Option(False, "--full", is_flag=True, flag_value=True, help="Full assessment (all tools, deep scan)."),
-    quick: bool = typer.Option(False, "--quick", is_flag=True, flag_value=True, help="Quick assessment (essential tools only)."),
-    offline: bool = typer.Option(False, "--offline", is_flag=True, flag_value=True, help="Offline mode - no LLM calls (demo)."),
-    interactive: bool = typer.Option(False, "--interactive", "-i", is_flag=True, flag_value=True, help="Interactive REPL mode."),
-    explain: bool = typer.Option(False, "--explain", is_flag=True, flag_value=True, help="Show AI explanation."),
+    target: str = typer.Argument(None, help="Target host or IP address."),
+    full: bool = typer.Option(False, "--full", help="Full assessment (all tools, deep scan)."),
+    quick: bool = typer.Option(False, "--quick", help="Quick assessment (essential tools only)."),
+    offline: bool = typer.Option(False, "--offline", help="Offline mode - no LLM calls (demo)."),
+    interactive: bool = typer.Option(False, "--interactive", "-i", help="Interactive REPL mode."),
+    explain: bool = typer.Option(False, "--explain", help="Show AI explanation."),
     max_steps: int = typer.Option(30, "--max-steps", help="Maximum agent steps."),
     goal: str = typer.Option(None, "--goal", "-g", help="Specific assessment goal."),
+    skill: str = typer.Option(None, "--skill", "-s", help="Run specific skill(s) by name (comma-separated)."),
+    list_skills: bool = typer.Option(False, "--list-skills", help="List available skills and exit."),
+    skill_mode: str = typer.Option("auto", "--skill-mode", help="Skill selection mode: auto, quick, full."),
 ) -> None:
     """
     AI-assisted vulnerability triage assessment.
@@ -38,7 +42,22 @@ def run(
     2. Identifies technologies and vulnerabilities
     3. Performs targeted enumeration
     4. Generates evidence-based triage report
+    
+    Skill-driven mode (--skill or default):
+    - Executes structured YAML skills deterministically
+    - More reliable than LLM tool calling
+    - Use --skill quick-triage for quick end-to-end scan
     """
+    # List skills and exit (no target needed)
+    if list_skills:
+        skill_registry.print_skills_table(show_all=True)
+        return
+    
+    # Target is required for actual assessment
+    if target is None:
+        console.print(Panel("[bold red]Error:[/bold red] Target is required", title="Missing Argument"))
+        return
+    
     console.print(Panel(f"[bold cyan]Security Assessment for {target}[/bold cyan]"))
     
     # Handle Typer/Click bug: boolean flags may come as strings
@@ -47,8 +66,15 @@ def run(
     offline = bool(offline)
     interactive = bool(interactive)
     explain = bool(explain)
+    list_skills = bool(list_skills)
     
-    # Check for LLM provider
+    # List skills and exit
+    if list_skills:
+        skill_registry.print_skills_table(show_all=True)
+        return
+    
+    # Check for LLM provider (not needed for skill-only offline mode)
+    provider = None
     if not offline:
         try:
             provider = MultiProvider.from_env()
@@ -63,12 +89,14 @@ def run(
             return
     else:
         console.print("[yellow]Offline mode - skipping LLM calls[/yellow]")
-        provider = None
     
     # Initialize agent state
     state = AgentState()
     state.context.target = target
     state.context.goals.append(goal or f"Penetration test on {target}")
+    
+    # Determine mode
+    use_skill_mode = skill is not None or (provider is None and not offline and quick)
     
     # Configure agent
     config = AgentConfig(
@@ -76,10 +104,13 @@ def run(
         evidence_gate_required=not offline,
         show_reasoning=explain,
         auto_report=True,
+        skill_mode=use_skill_mode,
+        skill_names=skill or "",
+        skill_mode_type=skill_mode,
     )
     
     # Create agent loop
-    loop = AgentLoop(state, provider, config) if provider else None
+    loop = AgentLoop(state, provider, config) if provider or use_skill_mode else None
     
     if interactive:
         # Launch REPL
@@ -88,8 +119,8 @@ def run(
         run_repl(target=target, config=config)
         return
     
-    # Quick mode: limit tools
-    if quick:
+    # Quick mode: limit tools (for LLM mode)
+    if quick and not use_skill_mode:
         console.print("[cyan]Quick mode: essential tools only[/cyan]")
         # The agent will self-limit based on goals
     

@@ -1,0 +1,46 @@
+name: nmap-recon
+description: "Quick port scan and service detection using nmap"
+tags: [recon, nmap, network, quick]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap]
+
+phases:
+  - name: port_scan
+    description: "Scan top 1000 TCP ports with service detection"
+    steps:
+      - name: scan_top_1000
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "top-1000"
+          service_detection: true
+        save_as: nmap_result
+        description: "Top-1000 port scan with service detection"
+        on_error: continue
+        extract_facts:
+          - pattern: '(\d+)/tcp\s+open\s+(\S+)'
+            fact: "Port {1}/tcp open: {2}"
+            type: high_signal
+          - pattern: '(\d+)/udp\s+open\s+(\S+)'
+            fact: "Port {1}/udp open: {2}"
+            type: high_signal
+
+  - name: os_detection
+    description: "OS fingerprinting if TCP ports are open"
+    condition: "fact_count('Port *') > 0"
+    steps:
+      - name: os_fingerprint
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "top-100"
+          service_detection: true
+        description: "OS fingerprint via nmap service detection"
+        on_error: skip_phase
+
+gates:
+  - name: ports_discovered
+    condition: "fact_count('Port *') > 0"
+    on_fail: "No open ports found - target may be down or heavily firewalled"
+    severity: warning
