@@ -28,4 +28,5 @@ Thumbs.db
 
 # ERREETOOL runtime outputs
 erreetool-output/
+erreetool-memory/
 erreetool/ai_debug.log

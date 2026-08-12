@@ -5,12 +5,10 @@ Supports free models from both providers with automatic fallback.
 """
 
 import os
-import json
 import time
-import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, Any
+from typing import Optional
 
 import httpx
 
@@ -64,7 +62,7 @@ class LLMResponse:
 
 class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
-    
+
     def __init__(
         self,
         api_key: str,
@@ -78,12 +76,15 @@ class LLMProvider(ABC):
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries
-    
+        # Reuse a single HTTP client across chat() calls for connection pooling.
+        # The client is lazily created on first use.
+        self._client: Optional[httpx.Client] = None
+
     @abstractmethod
     def _build_headers(self) -> dict:
         """Build request headers."""
         pass
-    
+
     @abstractmethod
     def _build_payload(
         self,
@@ -95,12 +96,29 @@ class LLMProvider(ABC):
     ) -> dict:
         """Build request payload."""
         pass
-    
+
     @abstractmethod
     def _parse_response(self, response: httpx.Response) -> LLMResponse:
         """Parse provider-specific response."""
         pass
-    
+
+    def _get_client(self) -> httpx.Client:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.Client(timeout=self.timeout)
+        return self._client
+
+    def close(self):
+        """Close the underlying HTTP client."""
+        if self._client is not None and not self._client.is_closed:
+            self._client.close()
+            self._client = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def chat(
         self,
         messages: list[LLMMessage],
@@ -112,26 +130,29 @@ class LLMProvider(ABC):
         """Send chat completion request with retries."""
         headers = self._build_headers()
         payload = self._build_payload(messages, temperature, max_tokens, tools, tool_choice)
-        
+
+        client = self._get_client()
         last_error = None
         for attempt in range(self.max_retries):
             try:
-                with httpx.Client(timeout=self.timeout) as client:
-                    response = client.post(
-                        f"{self.base_url}/chat/completions",
-                        headers=headers,
-                        json=payload
-                    )
-                    
-                    if response.status_code == 429:
-                        # Rate limited - wait and retry
+                response = client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+
+                if response.status_code == 429:
+                    # Rate limited - wait and retry
+                    try:
                         retry_after = int(response.headers.get("Retry-After", "5"))
-                        time.sleep(min(retry_after, 30))
-                        continue
-                    
-                    response.raise_for_status()
-                    return self._parse_response(response)
-            
+                    except (TypeError, ValueError):
+                        retry_after = 5
+                    time.sleep(min(retry_after, 30))
+                    continue
+
+                response.raise_for_status()
+                return self._parse_response(response)
+
             except httpx.HTTPStatusError as e:
                 last_error = e
                 if e.response.status_code >= 500:
@@ -139,13 +160,21 @@ class LLMProvider(ABC):
                     continue
                 # Client error - don't retry
                 raise
+            except httpx.RequestError as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise
             except Exception as e:
                 last_error = e
                 if attempt < self.max_retries - 1:
                     time.sleep(2 ** attempt)
                     continue
-        
-        raise RuntimeError(f"LLM request failed after {self.max_retries} attempts: {last_error}")
+
+        raise RuntimeError(
+            f"LLM request failed after {self.max_retries} attempts: {last_error}"
+        )
 
 
 class OpenRouterProvider(LLMProvider):
@@ -309,32 +338,51 @@ class NVIDIANIMProvider(LLMProvider):
 class MultiProvider:
     """
     Multi-provider with automatic fallback.
-    
+
     Tries providers in order until one succeeds.
     """
-    
+
     def __init__(self, providers: list[LLMProvider] = None):
         self.providers = providers or []
-    
+
     def add_provider(self, provider: LLMProvider):
         self.providers.append(provider)
-    
+
     def chat(self, messages: list[LLMMessage], **kwargs) -> LLMResponse:
         last_error = None
-        
+
         for provider in self.providers:
             try:
                 # Use try_free_models for OpenRouter if available
-                if hasattr(provider, 'try_free_models'):
+                if hasattr(provider, "try_free_models"):
                     return provider.try_free_models(messages, **kwargs)
                 return provider.chat(messages, **kwargs)
             except Exception as e:
                 last_error = e
-                # Log and continue to next provider
-                print(f"Provider {provider.__class__.__name__} failed: {e}")
+                # Log via stdout so callers don't have to handle Rich output
+                print(
+                    f"[multi-provider] {provider.__class__.__name__} failed: {e}"
+                )
                 continue
-        
-        raise RuntimeError(f"All providers failed. Last error: {last_error}")
+
+        raise RuntimeError(
+            f"All providers failed. Last error: {last_error}"
+        )
+
+    def close(self):
+        """Close all providers."""
+        for provider in self.providers:
+            if hasattr(provider, "close"):
+                try:
+                    provider.close()
+                except Exception:
+                    pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
     
     @classmethod
     def from_env(cls) -> "MultiProvider":

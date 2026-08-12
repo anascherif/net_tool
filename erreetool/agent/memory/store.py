@@ -44,7 +44,11 @@ class MemoryStore:
     }
 
     def __init__(self, memory_dir: Path = None):
-        self.memory_dir = memory_dir or Path.cwd() / "erreetool-memory"
+        if memory_dir is None:
+            # Use stable cross-cwd memory directory (see config.get_memory_dir)
+            from erreetool.config import get_memory_dir
+            memory_dir = get_memory_dir()
+        self.memory_dir = Path(memory_dir)
         self.memory_dir.mkdir(parents=True, exist_ok=True)
 
         # In-memory caches
@@ -233,6 +237,12 @@ class MemoryStore:
         )
         return self.add(entry)
 
+    # Confidence level ordering (low < medium < high < verified)
+    CONFIDENCE_ORDER = ["low", "medium", "high", "verified"]
+
+    def _confidence_rank(self, level: ConfidenceLevel) -> int:
+        return self.CONFIDENCE_ORDER.index(level.value)
+
     def add_cve_knowledge(self, cve: CVEKnowledge) -> MemoryEntry:
         """Add or update CVE knowledge."""
         existing = None
@@ -254,11 +264,13 @@ class MemoryStore:
                 existing.content["cvss_score"] = cve.cvss_score
             if cve.mitigation_notes:
                 existing.content["mitigation_notes"] = cve.mitigation_notes
-            existing.content["confidence"] = max(
-                ConfidenceLevel(existing.content.get("confidence", "low")).value,
-                cve.confidence.value,
-                key=lambda x: ["low", "medium", "high", "verified"].index(x)
+            # Compare confidence levels numerically (max of both)
+            existing_rank = self._confidence_rank(
+                ConfidenceLevel(existing.content.get("confidence", "low"))
             )
+            new_rank = self._confidence_rank(cve.confidence)
+            if new_rank > existing_rank:
+                existing.content["confidence"] = cve.confidence.value
             existing.content["last_updated"] = time.time()
             existing.updated_at = time.time()
             self._rewrite_type_file(MemoryType.CVE_KNOWLEDGE)

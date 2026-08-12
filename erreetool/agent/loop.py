@@ -80,6 +80,21 @@ WORKFLOW:
 4. EXPLOIT: Verify exploitable findings (if authorized)
 5. REPORT: Summarize findings with evidence citations
 
+SKILL MODE:
+- When skill-mode is active, structured YAML skills drive execution.
+- Each skill has phases with steps, evidence gates, and optional fact
+  extraction. Failed gate checks abort the skill and report why.
+- Prefer skill-driven assessment when a skill matches the goal so the
+  pipeline is deterministic and reproducible.
+- You can still call tools directly for ad-hoc investigation between
+  skills.
+
+MEMORY:
+- The agent has long-term memory across sessions: similar past targets,
+  recurring finding patterns, CVE knowledge, and credential patterns.
+- Use retrieved memory context to prioritize tools and avoid repeating
+  dead ends. When you reconfirm a known pattern, reference it.
+
 RULES:
 - Only use tools on authorized targets
 - Cite evidence IDs for all claims (e.g., "[e0001]")
@@ -374,21 +389,21 @@ RULES:
     def _extract_patterns_from_facts(self):
         """Extract and store finding patterns from current session facts."""
         from erreetool.agent.memory.schema import FindingPattern
-        
+
         facts = self.state.context.high_signal_facts
-        
+
         # Group facts by type
         port_facts = [f for f in facts if "port" in f.lower() and "open" in f.lower()]
         vuln_facts = [f for f in facts if "cve-" in f.lower()]
         tech_facts = [f for f in facts if any(t in f.lower() for t in ["web server", "cms", "technology"])]
-        
+
         if port_facts:
             pattern = FindingPattern(
                 pattern_id=f"port_pattern_{self.state.session_id}",
                 pattern_type="port",
                 description=f"Common open ports: {', '.join(p.split(':')[-1].strip() for p in port_facts[:5])}",
                 indicators=[p.split(':')[-1].strip() for p in port_facts[:5]],
-                associated_facts=port_facts,
+                associated_findings=port_facts,
                 seen_count=1,
                 last_seen=time.time(),
                 confidence=ConfidenceLevel.MEDIUM,
@@ -396,7 +411,7 @@ RULES:
                 tags=["port", "recon"],
             )
             memory_store.add_finding_pattern(pattern)
-        
+
         if vuln_facts:
             for vuln in vuln_facts:
                 cve_match = re.search(r'CVE-\d{4}-\d{4,7}', vuln)
@@ -407,7 +422,7 @@ RULES:
                         pattern_type="cve",
                         description=f"CVE pattern: {cve_id}",
                         indicators=[cve_id],
-                        associated_facts=[vuln],
+                        associated_findings=[vuln],
                         seen_count=1,
                         last_seen=time.time(),
                         confidence=ConfidenceLevel.HIGH,
@@ -415,14 +430,14 @@ RULES:
                         tags=["cve", "vuln"],
                     )
                     memory_store.add_finding_pattern(pattern)
-        
+
         if tech_facts:
             pattern = FindingPattern(
                 pattern_id=f"tech_pattern_{self.state.session_id}",
                 pattern_type="technology",
                 description=f"Technology stack: {', '.join(tech_facts[:3])}",
                 indicators=[f.split(':')[-1].strip() for f in tech_facts],
-                associated_facts=tech_facts,
+                associated_findings=tech_facts,
                 seen_count=1,
                 last_seen=time.time(),
                 confidence=ConfidenceLevel.MEDIUM,
@@ -604,29 +619,71 @@ RULES:
                 )
     
     def _extract_facts(self, tool: str, output: str):
-        """Extract high-signal facts from tool output."""
-        # Simple pattern-based extraction
+        """Extract high-signal facts from tool output.
+
+        The `tool` parameter is used to apply tool-specific parsing heuristics
+        on top of the generic patterns, so facts carry useful context (which
+        tool saw the artifact) and avoid noisy false positives (e.g. we only
+        look for web servers in nmap/whatweb output, not sqlmap output).
+        """
         import re
-        
-        # Port findings
-        for match in re.finditer(r'(\d+)/tcp\s+open\s+(\S+)', output):
-            port, service = match.groups()
-            self.state.add_high_signal_fact(f"Port {port}/tcp open: {service}")
-        
-        # Vulnerability findings
-        if "CVE-" in output:
-            for cve in re.findall(r'CVE-\d{4}-\d{4,}', output):
+
+        # ----- Generic port findings (nmap primarily) -----
+        if tool in ("nmap", "shell"):
+            for match in re.finditer(r'(\d+)/tcp\s+open\s+(\S+)', output):
+                port, service = match.groups()
+                self.state.add_high_signal_fact(
+                    f"Port {port}/tcp open: {service}"
+                )
+
+        # ----- Vulnerability findings (nuclei, nmap NSE) -----
+        if tool in ("nuclei", "nmap", "shell"):
+            for cve in re.findall(r'CVE-\d{4}-\d{4,7}', output):
                 self.state.add_high_signal_fact(f"Vulnerability found: {cve}")
-        
-        # Technology findings
-        for match in re.finditer(r'(\w+)[/\s]([\d.]+)', output):
-            tech, version = match.groups()
-            if tech.lower() in ['apache', 'nginx', 'iis', 'tomcat', 'jenkins', 'wordpress', 'drupal', 'joomla']:
-                self.state.add_high_signal_fact(f"Technology: {tech} {version}")
-        
-        # Database findings
-        if any(kw in output.lower() for kw in ['mysql', 'postgresql', 'mssql', 'oracle']):
-            self.state.add_high_signal_fact(f"Database service detected in output")
+
+        # ----- Technology findings -----
+        if tool in ("nmap", "whatweb", "nuclei", "shell"):
+            for match in re.finditer(r'(\w+)[/\s]([\d.]+)', output):
+                tech, version = match.groups()
+                if tech.lower() in {
+                    'apache', 'nginx', 'iis', 'tomcat',
+                    'jenkins', 'wordpress', 'drupal', 'joomla',
+                }:
+                    self.state.add_high_signal_fact(
+                        f"Technology: {tech} {version}"
+                    )
+
+        # ----- Database findings -----
+        if tool in ("nmap", "sqlmap", "shell"):
+            db_match = re.search(
+                r'\b(mysql|postgresql|mssql|oracle|mongodb|redis)\b',
+                output,
+                re.IGNORECASE,
+            )
+            if db_match:
+                self.state.add_high_signal_fact(
+                    f"Database service detected: {db_match.group(1).lower()}"
+                )
+
+        # ----- SQLi findings (sqlmap) -----
+        if tool == "sqlmap":
+            if re.search(
+                r'(injectable|sql injection|vulnerable|back-end DBMS)',
+                output,
+                re.IGNORECASE,
+            ):
+                self.state.add_high_signal_fact(
+                    "SQL injection vulnerability detected by sqlmap"
+                )
+
+        # ----- Directory findings (gobuster) -----
+        if tool == "gobuster":
+            for match in re.finditer(r'^/(?:Status:\s+\d+\s+\[Size:\s+\d+\]\s+)?\[\s*(\d+)\s*\]\s+(\S+)', output, re.MULTILINE):
+                status, path = match.groups()
+                if status in ("200", "301", "302", "401", "403"):
+                    self.state.add_high_signal_fact(
+                        f"Directory found: {path} (HTTP {status})"
+                    )
     
     def _process_final_response(self, content: str):
         """Process final answer from LLM."""
@@ -660,7 +717,11 @@ RULES:
         
         # Extract claims (sentences with CVE, port, vulnerability, etc.)
         import re
-        claims = re.findall(r'[^.]*?(?:CVE-\d{4}-\d{4,}|port \d+|vulnerab\w+|exploit\w+|credential\w+)[^.]*\.', content, re.IGNORECASE)
+        claims = re.findall(
+            r'[^.]*?(?:CVE-\d{4}-\d{4,7}|port \d+|vulnerab\w+|exploit\w+|credential\w+)[^.]*\.',
+            content,
+            re.IGNORECASE,
+        )
         
         all_verified = True
         for claim in claims:

@@ -5,6 +5,7 @@ Provides relevance-ranked memory entries based on current assessment context.
 """
 
 import re
+import hashlib
 from typing import Optional
 from dataclasses import dataclass
 
@@ -17,8 +18,12 @@ from erreetool.agent.memory.schema import (
     TargetProfile,
     CVEKnowledge,
     CredentialPattern,
+    ConfidenceLevel,
 )
-from erreetool.agent.state import AgentState, AgentContext
+from erreetool.agent.state import AgentState
+
+
+_CONFIDENCE_RANK = {lvl.value: i for i, lvl in enumerate(ConfidenceLevel)}
 
 
 @dataclass
@@ -140,12 +145,12 @@ class MemoryRetriever:
                             patterns.append(pattern)
                         break
         
-        # Sort by confidence and seen_count
-        patterns.sort(key=lambda p: (
-            ["low", "medium", "high", "verified"].index(p.confidence.value),
-            p.seen_count
-        ), reverse=True)
-        
+        # Sort by confidence (descending) and seen_count (descending)
+        patterns.sort(
+            key=lambda p: (_CONFIDENCE_RANK.get(p.confidence.value, 0), p.seen_count),
+            reverse=True,
+        )
+
         return patterns[:limit]
 
     def _get_target_profile(self, target: str, state: AgentState) -> Optional[TargetProfile]:
@@ -215,10 +220,10 @@ class MemoryRetriever:
 
     def _get_credential_patterns(self, state: AgentState) -> list[CredentialPattern]:
         """Get credential patterns for discovered services."""
-        patterns = []
+        patterns: list[CredentialPattern] = []
         facts = " ".join(state.context.high_signal_facts).lower()
-        
-        services = []
+
+        services: list[str] = []
         if "ssh" in facts or "22/tcp" in facts:
             services.append("ssh")
         if "ftp" in facts or "21/tcp" in facts:
@@ -233,11 +238,17 @@ class MemoryRetriever:
             services.append("postgresql")
         if "mssql" in facts or "1433/tcp" in facts:
             services.append("mssql")
-        
+
         for service in services:
-            patterns = self.store.get_credential_patterns(service)
-            patterns.extend(patterns[:3])  # Top 3 per service
-        
+            service_patterns = self.store.get_credential_patterns(service)
+            # Dedupe by (service, username, password) tuple
+            seen = {(p.service, p.username, p.password) for p in patterns}
+            for p in service_patterns[:3]:
+                key = (p.service, p.username, p.password)
+                if key not in seen:
+                    patterns.append(p)
+                    seen.add(key)
+
         return patterns
 
     def _target_similarity(self, target1: str, target2: str) -> float:
@@ -306,9 +317,6 @@ class MemoryRetriever:
             lines.append(f"Credential patterns: {len(context.credential_patterns)}")
         
         return "\n".join(lines) if lines else "No relevant memory found"
-
-
-import hashlib
 
 
 # Global retriever instance

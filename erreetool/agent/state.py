@@ -151,7 +151,11 @@ class AgentState:
     
     def __init__(self, session_id: str = None, output_dir: Path = None):
         self.session_id = session_id or f"session_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-        self.output_dir = output_dir or Path.cwd() / "erreetool-output" / self.session_id
+        if output_dir is None:
+            # Resolve a stable output dir that doesn't depend on cwd
+            from erreetool.config import get_output_dir
+            output_dir = get_output_dir(self.session_id)
+        self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         self.evidence_log: list[Evidence] = []

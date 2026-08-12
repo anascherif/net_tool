@@ -209,22 +209,6 @@ class ToolWrapper(ABC):
                 tool_name=self.name,
                 metadata={"error": "exception", "exception": str(e)},
             )
-    
-    def run_async(self, **kwargs):
-        """Run tool asynchronously (returns subprocess.Popen)."""
-        binary_path = self.resolve_binary()
-        if not binary_path:
-            raise RuntimeError(f"Tool '{self.name}' not found")
-        
-        args = self.build_args(**kwargs)
-        command = [binary_path] + args
-        
-        return subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
 
 
 class ToolRegistry:
