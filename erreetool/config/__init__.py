@@ -42,6 +42,10 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 # Also expose under a clearer name for callers
 NVIDIA_NIM_API_KEY = os.getenv("NVIDIA_NIM_API_KEY") or os.getenv("NIM_API_KEY")
 
+# Additional LLM providers
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
+
 
 def get_memory_dir() -> Path:
     """
@@ -102,3 +106,42 @@ def get_output_dir(session_id: str) -> Path:
     p = base / "erreetool" / "output" / session_id
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def get_wordlist_dir() -> Path:
+    """
+    Resolve the wordlist directory (SecLists).
+
+    Priority:
+      1. ERREETOOL_WORDLIST_DIR env var
+      2. Common SecLists locations
+    """
+    env_dir = os.getenv("ERREETOOL_WORDLIST_DIR")
+    if env_dir:
+        p = Path(env_dir).expanduser()
+        if p.exists():
+            return p
+
+    # Common locations
+    candidates = [
+        Path.home() / ".local" / "share" / "wordlists" / "SecLists",
+        Path("/usr/share/wordlists/SecLists"),
+        Path("/opt/wordlists/SecLists"),
+        Path("C:/Tools/wordlists/SecLists"),
+        project_root / "wordlists" / "SecLists",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+
+    # Return default (may not exist yet)
+    return Path.home() / ".local" / "share" / "wordlists" / "SecLists"
+
+
+def find_wordlist(name: str) -> Path | None:
+    """Find a specific wordlist file by name (e.g., 'directory-list-2.3-medium.txt')."""
+    base = get_wordlist_dir()
+    # Search recursively
+    for p in base.rglob(name):
+        return p
+    return None

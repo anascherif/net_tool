@@ -335,6 +335,140 @@ class NVIDIANIMProvider(LLMProvider):
         )
 
 
+class GroqProvider(LLMProvider):
+    """Groq provider - fast inference with free tier."""
+
+    FREE_MODELS = [
+        "llama-3.1-70b-versatile",
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+    ]
+
+    def __init__(
+        self,
+        api_key: str = None,
+        model: str = "llama-3.1-70b-versatile",
+        **kwargs
+    ):
+        api_key = api_key or os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise ValueError("GROQ_API_KEY not set")
+
+        super().__init__(
+            api_key=api_key,
+            base_url="https://api.groq.com/openai/v1",
+            model=model,
+            **kwargs
+        )
+
+    def _build_headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _build_payload(
+        self,
+        messages: list[LLMMessage],
+        temperature: float,
+        max_tokens: int,
+        tools: list[dict] = None,
+        tool_choice: str = "auto"
+    ) -> dict:
+        payload = {
+            "model": self.model,
+            "messages": [m.to_dict() for m in messages],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice
+        return payload
+
+    def _parse_response(self, response: httpx.Response) -> LLMResponse:
+        data = response.json()
+        choice = data["choices"][0]
+        message = choice["message"]
+
+        return LLMResponse(
+            content=message.get("content", "") or "",
+            tool_calls=message.get("tool_calls", []),
+            model=data.get("model", self.model),
+            usage=data.get("usage", {}),
+            finish_reason=choice.get("finish_reason", ""),
+            raw=data,
+        )
+
+
+class TogetherAIProvider(LLMProvider):
+    """Together.ai provider - free tier available."""
+
+    FREE_MODELS = [
+        "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+        "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+        "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "Qwen/Qwen2.5-72B-Instruct-Turbo",
+    ]
+
+    def __init__(
+        self,
+        api_key: str = None,
+        model: str = "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+        **kwargs
+    ):
+        api_key = api_key or os.getenv("TOGETHER_API_KEY")
+        if not api_key:
+            raise ValueError("TOGETHER_API_KEY not set")
+
+        super().__init__(
+            api_key=api_key,
+            base_url="https://api.together.xyz/v1",
+            model=model,
+            **kwargs
+        )
+
+    def _build_headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _build_payload(
+        self,
+        messages: list[LLMMessage],
+        temperature: float,
+        max_tokens: int,
+        tools: list[dict] = None,
+        tool_choice: str = "auto"
+    ) -> dict:
+        payload = {
+            "model": self.model,
+            "messages": [m.to_dict() for m in messages],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice
+        return payload
+
+    def _parse_response(self, response: httpx.Response) -> LLMResponse:
+        data = response.json()
+        choice = data["choices"][0]
+        message = choice["message"]
+
+        return LLMResponse(
+            content=message.get("content", "") or "",
+            tool_calls=message.get("tool_calls", []),
+            model=data.get("model", self.model),
+            usage=data.get("usage", {}),
+            finish_reason=choice.get("finish_reason", ""),
+            raw=data,
+        )
+
+
 class MultiProvider:
     """
     Multi-provider with automatic fallback.
@@ -383,23 +517,44 @@ class MultiProvider:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-    
+
     @classmethod
     def from_env(cls) -> "MultiProvider":
-        """Create multi-provider from environment variables."""
+        """Create multi-provider from environment variables.
+
+        Priority order (first available is tried first):
+        1. OpenRouter - many free models, auto-routing
+        2. Groq - fast inference, generous free tier
+        3. Together.ai - many open models, free tier
+        4. NVIDIA NIM - hosted open models, free tier
+        """
         providers = []
-        
-        # OpenRouter (primary)
+
+        # OpenRouter (primary - most free models)
         if os.getenv("OPENROUTER_API_KEY"):
             providers.append(OpenRouterProvider())
-        
+
+        # Groq (fast, good free tier)
+        if os.getenv("GROQ_API_KEY"):
+            providers.append(GroqProvider())
+
+        # Together.ai (many open models)
+        if os.getenv("TOGETHER_API_KEY"):
+            providers.append(TogetherAIProvider())
+
         # NVIDIA NIM (fallback)
         if os.getenv("NVIDIA_NIM_API_KEY"):
             providers.append(NVIDIANIMProvider())
-        
+
         if not providers:
-            raise ValueError("No LLM API keys found. Set OPENROUTER_API_KEY or NVIDIA_NIM_API_KEY")
-        
+            raise ValueError(
+                "No LLM API keys found. Set at least one of:\n"
+                "  OPENROUTER_API_KEY (https://openrouter.ai/keys)\n"
+                "  GROQ_API_KEY (https://console.groq.com/keys)\n"
+                "  TOGETHER_API_KEY (https://api.together.xyz/settings/api-keys)\n"
+                "  NVIDIA_NIM_API_KEY (https://build.nvidia.com/)"
+            )
+
         return cls(providers)
 
 

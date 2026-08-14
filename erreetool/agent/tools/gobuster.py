@@ -5,6 +5,18 @@ Supports gobuster (Go) and feroxbuster (Rust) for cross-platform compatibility.
 """
 
 from erreetool.agent.tools.base import ToolWrapper, ToolResult
+from erreetool.config import find_wordlist
+
+
+# Common SecLists wordlist names
+COMMON_WORDLISTS = [
+    "directory-list-2.3-medium.txt",
+    "directory-list-2.3-small.txt",
+    "directory-list-1.0.txt",
+    "common.txt",
+    "raft-medium-directories.txt",
+    "raft-small-directories.txt",
+]
 
 
 class GobusterWrapper(ToolWrapper):
@@ -19,6 +31,17 @@ class GobusterWrapper(ToolWrapper):
         super().__init__(timeout, custom_binary)
         self.mode = mode  # dir, dns, vhost, fuzz
     
+    def _resolve_wordlist(self, wordlist: str | None) -> str | None:
+        """Resolve wordlist path, auto-detecting from SecLists if needed."""
+        if wordlist:
+            return wordlist
+        # Try common wordlists in order
+        for wl in COMMON_WORDLISTS:
+            found = find_wordlist(wl)
+            if found:
+                return str(found)
+        return None
+
     def build_args(
         self,
         target: str,
@@ -36,9 +59,10 @@ class GobusterWrapper(ToolWrapper):
         # Target URL
         args.extend(["-u", target])
         
-        # Wordlist
-        if wordlist:
-            args.extend(["-w", wordlist])
+        # Wordlist (auto-detect if not provided)
+        resolved_wl = self._resolve_wordlist(wordlist)
+        if resolved_wl:
+            args.extend(["-w", resolved_wl])
         
         # Extensions (for dir mode)
         if self.mode == "dir" and extensions:
@@ -110,6 +134,16 @@ class FeroxbusterWrapper(ToolWrapper):
     linux_binary = "feroxbuster"
     DEFAULT_TIMEOUT = 300
     
+    def _resolve_wordlist(self, wordlist: str | None) -> str | None:
+        """Resolve wordlist path, auto-detecting from SecLists if needed."""
+        if wordlist:
+            return wordlist
+        for wl in COMMON_WORDLISTS:
+            found = find_wordlist(wl)
+            if found:
+                return str(found)
+        return None
+
     def build_args(
         self,
         target: str,
@@ -127,9 +161,10 @@ class FeroxbusterWrapper(ToolWrapper):
         # Target URL
         args.extend(["-u", target])
         
-        # Wordlist
-        if wordlist:
-            args.extend(["-w", wordlist])
+        # Wordlist (auto-detect if not provided)
+        resolved_wl = self._resolve_wordlist(wordlist)
+        if resolved_wl:
+            args.extend(["-w", resolved_wl])
         
         # Extensions
         if extensions:

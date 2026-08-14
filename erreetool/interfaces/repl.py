@@ -26,7 +26,7 @@ class ErreetoolREPL(cmd.Cmd):
     """Interactive REPL for erreetool agent."""
     
     intro = ""
-    prompt = "🦞 erreetool> "
+    prompt = " erreetool> "
     
     def __init__(self, target: str = None, config: AgentConfig = None):
         super().__init__()
@@ -48,9 +48,9 @@ class ErreetoolREPL(cmd.Cmd):
         try:
             self.provider = MultiProvider.from_env()
             provider_names = [p.__class__.__name__ for p in self.provider.providers]
-            console.print(f"[green]✓[/green] LLM providers loaded: {', '.join(provider_names)}")
+            console.print(f"[green]OK[/green] LLM providers loaded: {', '.join(provider_names)}")
         except ValueError as e:
-            console.print(f"[red]✗[/red] {e}")
+            console.print(f"[red]FAIL[/red] {e}")
             console.print("[yellow]Set OPENROUTER_API_KEY or NVIDIA_NIM_API_KEY in .env[/yellow]")
             self.provider = None
     
@@ -60,7 +60,7 @@ class ErreetoolREPL(cmd.Cmd):
         self.state.context.target = target
         self.state.context.goals.append(f"Penetration test on {target}")
         self.loop = AgentLoop(self.state, self.provider, self.config)
-        console.print(f"[green]✓[/green] Session initialized for target: {target}")
+        console.print(f"[green]OK[/green] Session initialized for target: {target}")
     
     def preloop(self):
         """Print welcome message."""
@@ -71,7 +71,7 @@ class ErreetoolREPL(cmd.Cmd):
     def _print_banner(self):
         """Print welcome banner."""
         banner = Text()
-        banner.append("🦞 ", style="bold red")
+        banner.append(" ", style="bold red")
         banner.append("erreetool ", style="bold cyan")
         banner.append("AI Penetration Testing Agent", style="white")
         console.print(Panel(banner, border_style="cyan"))
@@ -104,7 +104,7 @@ class ErreetoolREPL(cmd.Cmd):
         try:
             self.state.context.goals.append(goal)
             self.loop.run(goal)
-            console.print("[green]✓[/green] Assessment complete!")
+            console.print("[green]OK[/green] Assessment complete!")
             self._show_summary()
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted by user.[/yellow]")
@@ -139,10 +139,10 @@ class ErreetoolREPL(cmd.Cmd):
         try:
             result = executor(**kwargs)
             if result.success:
-                console.print(f"[green]✓[/green] {tool_name} completed in {result.duration:.1f}s")
+                console.print(f"[green]OK[/green] {tool_name} completed in {result.duration:.1f}s")
                 console.print(result.stdout[:2000])
             else:
-                console.print(f"[red]✗[/red] {tool_name} failed: {result.stderr}")
+                console.print(f"[red]FAIL[/red] {tool_name} failed: {result.stderr}")
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
     
@@ -292,11 +292,11 @@ class ErreetoolREPL(cmd.Cmd):
         
         verified, matches = self.state.verify_claim(arg)
         if verified:
-            console.print(f"[green]✓ VERIFIED[/green]: {arg}")
+            console.print(f"[green]OK VERIFIED[/green]: {arg}")
             for m in matches:
                 console.print(f"  Evidence: [{m.id}] {m.source}")
         else:
-            console.print(f"[red]✗ UNVERIFIED[/red]: {arg}")
+            console.print(f"[red]FAIL UNVERIFIED[/red]: {arg}")
     
     def do_tools(self, arg):
         """List available tools and their status."""
@@ -310,7 +310,7 @@ class ErreetoolREPL(cmd.Cmd):
         for name, available in status.items():
             tool = tool_registry.get(name)
             binary = tool.binary if tool else "N/A"
-            status_str = "[green]✓ Available[/green]" if available else "[red]✗ Not found[/red]"
+            status_str = "[green]OK Available[/green]" if available else "[red]FAIL Not found[/red]"
             table.add_row(name, status_str, binary)
         
         console.print(table)
@@ -324,7 +324,7 @@ class ErreetoolREPL(cmd.Cmd):
         from erreetool.reporting.generator import ReportGenerator
         generator = ReportGenerator()
         report_path = generator.generate(self.state)
-        console.print(f"[green]✓[/green] Report generated: {report_path}")
+        console.print(f"[green]OK[/green] Report generated: {report_path}")
     
     def do_save(self, arg):
         """Save session state."""
@@ -333,7 +333,7 @@ class ErreetoolREPL(cmd.Cmd):
             return
         
         self.state.save()
-        console.print(f"[green]✓[/green] Session saved to {self.state.state_file}")
+        console.print(f"[green]OK[/green] Session saved to {self.state.state_file}")
     
     def do_load(self, arg):
         """Load session: load <state_file>"""
@@ -344,7 +344,7 @@ class ErreetoolREPL(cmd.Cmd):
         try:
             self.state = AgentState.load(Path(arg.strip()))
             self.loop = AgentLoop(self.state, self.provider, self.config)
-            console.print(f"[green]✓[/green] Session loaded: {self.state.session_id}")
+            console.print(f"[green]OK[/green] Session loaded: {self.state.session_id}")
         except Exception as e:
             console.print(f"[red]Error loading session: {e}[/red]")
     
@@ -358,8 +358,8 @@ class ErreetoolREPL(cmd.Cmd):
         console.print("[bold]Recent steps:[/bold]")
         for step in self.state.steps[-20:] if self.state else []:
             status_icon = {
-                "completed": "[green]✓[/green]",
-                "failed": "[red]✗[/red]",
+                "completed": "[green]OK[/green]",
+                "failed": "[red]FAIL[/red]",
                 "running": "[yellow]⟳[/yellow]",
             }.get(step.status.value, "?")
             console.print(f"  {status_icon} {step.id}: {step.description} ({step.tool})")
