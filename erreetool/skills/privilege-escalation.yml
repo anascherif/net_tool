@@ -1,0 +1,158 @@
+name: privilege-escalation
+description: "Privilege escalation checks - misconfigurations, weak permissions, and common paths"
+tags: [privesc, privilege-escalation, linux, windows, misconfig]
+author: erreetool
+version: "1.0"
+requires_tools: [shell]
+
+phases:
+  - name: shell_access_check
+    description: "Verify shell access is available"
+    steps:
+      - name: check_shell
+        tool: shell
+        args:
+          command: "id 2>&1 || whoami 2>&1 || echo 'no shell access'"
+          timeout: 5
+        save_as: shell_check
+        description: "Verify shell access"
+        on_error: abort
+        extract_facts:
+          - pattern: 'uid=(\d+)\((\w+)\)\s+gid=\d+\((\w+)\)'
+            fact: "Current user: {2} (uid={1}, gid via {3})"
+            type: high_signal
+          - pattern: '^(\w+)$'
+            fact: "Current user: {1}"
+            type: high_signal
+
+  - name: linux_privesc
+    description: "Linux-specific privilege escalation checks"
+    condition: "fact_count('Current user*') > 0"
+    steps:
+      - name: suid_binaries
+        tool: shell
+        args:
+          command: "find / -perm -4000 -type f 2>/dev/null | head -50 || echo 'no suid found'"
+          timeout: 30
+        save_as: suid_bins
+        description: "Find SUID binaries (common privesc targets)"
+        on_error: continue
+        extract_facts:
+          - pattern: '(/[\w/.-]+)$'
+            fact: "SUID binary: {1}"
+            type: high_signal
+      - name: sudo_check
+        tool: shell
+        args:
+          command: "sudo -l 2>&1 || echo 'no sudo access'"
+          timeout: 10
+        save_as: sudo_perms
+        description: "Check sudo permissions"
+        on_error: continue
+        extract_facts:
+          - pattern: '\(ALL\)\s+(NOPASSD:)?\s*(.+)'
+            fact: "Sudo: ALL - {2}"
+            type: high_signal
+          - pattern: '\(ALL(:ALL)?\)\s+NOPASSWD:\s+(.+)'
+            fact: "Sudo NOPASSWD: {3}"
+            type: high_signal
+          - pattern: '\(root\)\s+NOPASSWD:\s+(.+)'
+            fact: "Sudo root NOPASSWD: {1}"
+            type: high_signal
+      - name: writable_files
+        tool: shell
+        args:
+          command: "find /etc /opt /usr/local -writable -type f 2>/dev/null | head -20 || echo 'none'"
+          timeout: 30
+        save_as: writable
+        description: "Find world-writable files in system dirs"
+        on_error: continue
+        extract_facts:
+          - pattern: '(/[\w/.-]+)$'
+            fact: "Writable system file: {1}"
+            type: high_signal
+      - name: cron_jobs
+        tool: shell
+        args:
+          command: "cat /etc/crontab /etc/cron.d/* 2>/dev/null | grep -v '^#' | grep -v '^$' || echo 'no cron'"
+          timeout: 10
+        save_as: cron
+        description: "Check cron jobs for privesc paths"
+        on_error: continue
+        extract_facts:
+          - pattern: '^\s*\*\s+([\w]+)\s+([\w/]+)'
+            fact: "Cron job: {2} (user: {1})"
+            type: high_signal
+          - pattern: '^\s*(\d+)\s+(\w+)\s+([\w/]+)\s+([\w/.-]+)'
+            fact: "Cron task: {4} (user: {2})"
+            type: high_signal
+      - name: kernel_check
+        tool: shell
+        args:
+          command: "uname -r 2>&1 || echo 'unknown'"
+          timeout: 5
+        save_as: kernel
+        description: "Get kernel version for exploit matching"
+        on_error: continue
+        extract_facts:
+          - pattern: '^([\d.]+)-(\S+)'
+            fact: "Kernel version: {1}-{2}"
+            type: high_signal
+
+  - name: win_privesc
+    description: "Windows-specific privilege escalation checks"
+    condition: "fact_count('Current user*') > 0"
+    steps:
+      - name: win_system_info
+        tool: shell
+        args:
+          command: "systeminfo 2>nul | findstr /B /C:\"OS Name\" /C:\"OS Version\" /C:\"System Type\" || echo 'not windows'"
+          timeout: 15
+        save_as: win_sysinfo
+        description: "Windows system info"
+        on_error: continue
+        extract_facts:
+          - pattern: 'OS Name:\s*(.+)'
+            fact: "Windows OS: {1}"
+            type: high_signal
+          - pattern: 'OS Version:\s*(.+)'
+            fact: "Windows version: {1}"
+            type: high_signal
+      - name: win_unquoted
+        tool: shell
+        args:
+          command: "wmic service get name,displayname,pathname,startmode 2>nul | findstr /i auto | findstr /i \"C:\\\\Program\" || echo 'none'"
+          timeout: 15
+        save_as: win_services
+        description: "Check for unquoted service paths"
+        on_error: continue
+        extract_facts:
+          - pattern: '(\w+)\s+(.+)\s+C:\\(\S+)'
+            fact: "Windows service: {1} - {3}"
+            type: high_signal
+      - name: win_always_install
+        tool: shell
+        args:
+          command: "reg query HKCU\\SOFTWARE\\Policies\\Microsoft\\Windows\\Installer 2>nul | findstr AlwaysInstallElevated || echo 'safe'"
+          timeout: 10
+        save_as: win_installer
+        description: "Check for AlwaysInstallElevated"
+        on_error: continue
+        extract_facts:
+          - pattern: 'AlwaysInstallElevated\s+REG_DWORD\s+0x1'
+            fact: "Windows AlwaysInstallElevated enabled"
+            type: high_signal
+
+gates:
+  - name: shell_confirmed
+    condition: "fact_count('Current user*') > 0"
+    on_fail: "No shell access available - cannot perform privesc checks"
+    severity: error
+  - name: suid_risks
+    condition: "fact_count('SUID binary*') > 0"
+    on_fail: "No SUID binaries found (or scan skipped)"
+    severity: info
+  - name: sudo_risks
+    condition: "fact_count('Sudo*') > 0"
+    on_fail: "No sudo permissions or user not in sudo group"
+    severity: info

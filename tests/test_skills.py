@@ -533,5 +533,211 @@ def test_crypto_skill_integration():
     assert result.duration > 0
 
 
+# ===== Integration Tests for New Skills (Phase 5) =====
+
+def test_ad_enumeration_skill():
+    """Test AD enumeration skill parses correctly."""
+    import yaml
+    skill_path = Path("erreetool/skills/ad-enumeration.yml")
+    assert skill_path.exists()
+
+    with open(skill_path) as f:
+        data = yaml.safe_load(f)
+
+    skill = parse_skill(data, source_file=str(skill_path))
+    assert skill.name == "ad-enumeration"
+    assert "ad" in skill.tags
+    assert "smb" in skill.tags
+    assert "nmap" in skill.requires_tools
+    assert len(skill.phases) == 4
+    assert len(skill.gates) == 3
+    # Check phase conditions
+    phase_names = [p.name for p in skill.phases]
+    assert "smb_discovery" in phase_names
+    assert "smb_share_enum" in phase_names
+    assert "ldap_enum" in phase_names
+    assert "rpc_enum" in phase_names
+
+
+def test_ldap_enumeration_skill():
+    """Test LDAP enumeration skill parses correctly."""
+    import yaml
+    skill_path = Path("erreetool/skills/ldap-enumeration.yml")
+    assert skill_path.exists()
+
+    with open(skill_path) as f:
+        data = yaml.safe_load(f)
+
+    skill = parse_skill(data, source_file=str(skill_path))
+    assert skill.name == "ldap-enumeration"
+    assert "ldap" in skill.tags
+    assert "nmap" in skill.requires_tools
+    assert len(skill.phases) == 3
+    phase_names = [p.name for p in skill.phases]
+    assert "ldap_discovery" in phase_names
+    assert "rootdse_enum" in phase_names
+    assert "ldap_search" in phase_names
+
+
+def test_docker_enumeration_skill():
+    """Test Docker enumeration skill parses correctly."""
+    import yaml
+    skill_path = Path("erreetool/skills/docker-enumeration.yml")
+    assert skill_path.exists()
+
+    with open(skill_path) as f:
+        data = yaml.safe_load(f)
+
+    skill = parse_skill(data, source_file=str(skill_path))
+    assert skill.name == "docker-enumeration"
+    assert "docker" in skill.tags
+    assert "container" in skill.tags
+    assert "nmap" in skill.requires_tools
+    assert "shell" in skill.requires_tools
+    assert len(skill.phases) == 4
+    phase_names = [p.name for p in skill.phases]
+    assert "docker_port_scan" in phase_names
+    assert "docker_api_check" in phase_names
+    assert "docker_registry_check" in phase_names
+    assert "es_check" in phase_names
+
+
+def test_cloud_aws_recon_skill():
+    """Test AWS cloud recon skill parses correctly."""
+    import yaml
+    skill_path = Path("erreetool/skills/cloud-aws-recon.yml")
+    assert skill_path.exists()
+
+    with open(skill_path) as f:
+        data = yaml.safe_load(f)
+
+    skill = parse_skill(data, source_file=str(skill_path))
+    assert skill.name == "cloud-aws-recon"
+    assert "cloud" in skill.tags
+    assert "aws" in skill.tags
+    assert "shell" in skill.requires_tools
+    assert len(skill.phases) == 3
+    phase_names = [p.name for p in skill.phases]
+    assert "imds_check" in phase_names
+    assert "imds_depth" in phase_names
+    assert "s3_enum" in phase_names
+
+
+def test_privilege_escalation_skill():
+    """Test privilege escalation skill parses correctly."""
+    import yaml
+    skill_path = Path("erreetool/skills/privilege-escalation.yml")
+    assert skill_path.exists()
+
+    with open(skill_path) as f:
+        data = yaml.safe_load(f)
+
+    skill = parse_skill(data, source_file=str(skill_path))
+    assert skill.name == "privilege-escalation"
+    assert "privesc" in skill.tags
+    assert "linux" in skill.tags
+    assert "windows" in skill.tags
+    assert "shell" in skill.requires_tools
+    assert len(skill.phases) == 3
+    phase_names = [p.name for p in skill.phases]
+    assert "shell_access_check" in phase_names
+    assert "linux_privesc" in phase_names
+    assert "win_privesc" in phase_names
+
+
+def test_api_testing_skill():
+    """Test API testing skill parses correctly."""
+    import yaml
+    skill_path = Path("erreetool/skills/api-testing.yml")
+    assert skill_path.exists()
+
+    with open(skill_path) as f:
+        data = yaml.safe_load(f)
+
+    skill = parse_skill(data, source_file=str(skill_path))
+    assert skill.name == "api-testing"
+    assert "api" in skill.tags
+    assert "rest" in skill.tags
+    assert "nmap" in skill.requires_tools
+    assert "shell" in skill.requires_tools
+    assert len(skill.phases) == 4
+    phase_names = [p.name for p in skill.phases]
+    assert "api_discovery" in phase_names
+    assert "auth_test" in phase_names
+    assert "injection_test" in phase_names
+    assert "misconfig_test" in phase_names
+
+
+def test_subdomain_enumeration_skill():
+    """Test subdomain enumeration skill parses correctly."""
+    import yaml
+    skill_path = Path("erreetool/skills/subdomain-enumeration.yml")
+    assert skill_path.exists()
+
+    with open(skill_path) as f:
+        data = yaml.safe_load(f)
+
+    skill = parse_skill(data, source_file=str(skill_path))
+    assert skill.name == "subdomain-enumeration"
+    assert "subdomain" in skill.tags
+    assert "dns" in skill.tags
+    assert "nmap" in skill.requires_tools
+    assert len(skill.phases) == 3
+    phase_names = [p.name for p in skill.phases]
+    assert "zone_transfer_check" in phase_names
+    assert "dns_brute" in phase_names
+    assert "reverse_dns" in phase_names
+
+
+def test_kerberos_enumeration_skill():
+    """Test Kerberos enumeration skill parses correctly."""
+    import yaml
+    skill_path = Path("erreetool/skills/kerberos-enumeration.yml")
+    assert skill_path.exists()
+
+    with open(skill_path) as f:
+        data = yaml.safe_load(f)
+
+    skill = parse_skill(data, source_file=str(skill_path))
+    assert skill.name == "kerberos-enumeration"
+    assert "kerberos" in skill.tags
+    assert "ad" in skill.tags
+    assert "nmap" in skill.requires_tools
+    assert len(skill.phases) == 3
+    phase_names = [p.name for p in skill.phases]
+    assert "kerberos_discovery" in phase_names
+    assert "kerberos_enum" in phase_names
+    assert "as_rep_roast_check" in phase_names
+
+
+def test_all_new_skills_executor_integration():
+    """Test all new skills can be instantiated and executed with mock tools."""
+    import yaml
+    skill_files = [
+        "ad-enumeration.yml",
+        "ldap-enumeration.yml",
+        "docker-enumeration.yml",
+        "cloud-aws-recon.yml",
+        "privilege-escalation.yml",
+        "api-testing.yml",
+        "subdomain-enumeration.yml",
+        "kerberos-enumeration.yml",
+    ]
+
+    for skill_file in skill_files:
+        skill_path = Path(f"erreetool/skills/{skill_file}")
+        assert skill_path.exists(), f"Missing {skill_file}"
+
+        with open(skill_path) as f:
+            data = yaml.safe_load(f)
+
+        skill = parse_skill(data, source_file=str(skill_path))
+        assert skill.name == skill_file.replace(".yml", "")
+        assert len(skill.phases) > 0
+        # Each phase should have at least one step
+        for phase in skill.phases:
+            assert len(phase.steps) > 0, f"Phase {phase.name} has no steps in {skill_file}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

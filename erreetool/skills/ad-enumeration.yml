@@ -1,0 +1,121 @@
+name: ad-enumeration
+description: "Active Directory enumeration via SMB/RPC/LDAP"
+tags: [ad, active-directory, windows, enumeration, smb, ldap]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap]
+
+phases:
+  - name: smb_discovery
+    description: "Check for SMB service (port 445)"
+    steps:
+      - name: nmap_smb
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "139,445"
+          service_detection: true
+          scripts: "smb-os-discovery,smb-system-info"
+        save_as: smb_scan
+        description: "SMB service detection and OS discovery"
+        timeout: 180
+        on_error: continue
+        extract_facts:
+          - pattern: '(\d+)/tcp\s+open\s+(\S+)'
+            fact: "Port {1}/tcp open: {2}"
+            type: high_signal
+          - pattern: '(?i)OS:\s*(.+)'
+            fact: "SMB OS: {1}"
+            type: high_signal
+          - pattern: '(?i)NetBIOS computer name:\s*(.+)'
+            fact: "NetBIOS name: {1}"
+            type: high_signal
+          - pattern: '(?i)Domain:\s*(.+)'
+            fact: "AD Domain: {1}"
+            type: high_signal
+          - pattern: '(?i)DNS:\s*(.+)'
+            fact: "AD DNS: {1}"
+            type: high_signal
+
+  - name: smb_share_enum
+    description: "Enumerate SMB shares if port 445 is open"
+    condition: "has_fact('445/tcp') or has_fact('139/tcp')"
+    steps:
+      - name: nmap_shares
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "445"
+          scripts: "smb-enum-shares,smb-enum-users,smb-enum-groups"
+        save_as: smb_shares
+        description: "SMB share, user, and group enumeration"
+        timeout: 300
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)\\\\(\S+)\s+(?:UNKNOWN|Disk|IPC)\s+(.*)'
+            fact: "SMB share: \\\\{1} - {2}"
+            type: high_signal
+          - pattern: '(?i)user:\s*(\S+)'
+            fact: "AD user: {1}"
+            type: high_signal
+          - pattern: '(?i)group:\s*(\S+)'
+            fact: "AD group: {1}"
+            type: high_signal
+
+  - name: ldap_enum
+    description: "LDAP enumeration if port 389/636 open"
+    condition: "has_fact('389/tcp') or has_fact('636/tcp') or has_fact('3268/tcp')"
+    steps:
+      - name: nmap_ldap
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "389,636,3268"
+          scripts: "ldap-search,ldap-rootdse"
+        save_as: ldap_scan
+        description: "LDAP search and RootDSE enumeration"
+        timeout: 180
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)domainController.*?(\d+\.\d+\.\d+\.\d+)'
+            fact: "DC IP: {1}"
+            type: high_signal
+          - pattern: '(?i)rootDomainNamingContext:\s*(.+)'
+            fact: "LDAP naming context: {1}"
+            type: high_signal
+          - pattern: '(?i)ldapBaseName:\s*(.+)'
+            fact: "LDAP base: {1}"
+            type: high_signal
+
+  - name: rpc_enum
+    description: "RPC enumeration if port 135 open"
+    condition: "has_fact('135/tcp')"
+    steps:
+      - name: nmap_rpc
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "135"
+          scripts: "rpcinfo,msrpc-enum"
+        save_as: rpc_scan
+        description: "RPC endpoint enumeration"
+        timeout: 180
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)program\s+(\d+)\s+version\s+(\d+)'
+            fact: "RPC program {1} v{2}"
+            type: observation
+
+gates:
+  - name: smb_found
+    condition: "has_fact('445/tcp') or has_fact('139/tcp')"
+    on_fail: "No SMB service found - target may not be a Windows/AD host"
+    severity: info
+  - name: ad_domain_found
+    condition: "fact_count('AD Domain*') > 0 or fact_count('NetBIOS*') > 0"
+    on_fail: "No AD domain info extracted - check if SMB is properly configured"
+    severity: warning
+  - name: users_found
+    condition: "fact_count('AD user*') > 0"
+    on_fail: "No users enumerated - may need credentials for deeper enumeration"
+    severity: info

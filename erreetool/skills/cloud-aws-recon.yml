@@ -1,0 +1,103 @@
+name: cloud-aws-recon
+description: "AWS cloud reconnaissance - S3 buckets, metadata service, and exposed services"
+tags: [cloud, aws, s3, metadata, recon]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap, shell]
+
+phases:
+  - name: imds_check
+    description: "Check for AWS Instance Metadata Service (IMDS)"
+    steps:
+      - name: imds_v1_check
+        tool: shell
+        args:
+          command: "curl -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-id 2>&1 || echo 'Not running on EC2 or IMDS blocked'"
+          timeout: 10
+        save_as: imds_v1
+        description: "Check IMDSv1 (no auth required - vulnerable)"
+        on_error: continue
+        extract_facts:
+          - pattern: '^i-[a-z0-9]+$'
+            fact: "AWS IMDSv1 exposed - instance: {0}"
+            type: high_signal
+      - name: imds_v2_check
+        tool: shell
+        args:
+          command: "TOKEN=$(curl -s -X PUT --max-time 5 http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' 2>/dev/null) && curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/instance-id 2>&1 || echo 'IMDSv2 blocked or not on EC2'"
+          timeout: 15
+        save_as: imds_v2
+        description: "Check IMDSv2 (token-based - secure)"
+        on_error: continue
+        extract_facts:
+          - pattern: '^i-[a-z0-9]+$'
+            fact: "AWS IMDSv2 available - instance: {0}"
+            type: high_signal
+
+  - name: imds_depth
+    description: "Extract more IMDS data if available"
+    condition: "fact_count('AWS IMDS*') > 0"
+    steps:
+      - name: imds_iam_role
+        tool: shell
+        args:
+          command: "TOKEN=$(curl -s -X PUT --max-time 5 http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' 2>/dev/null) && curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/iam/security-credentials/ 2>&1 || echo 'failed'"
+          timeout: 15
+        save_as: imds_iam
+        description: "Extract IAM role name from IMDS"
+        on_error: continue
+        extract_facts:
+          - pattern: '^([a-zA-Z0-9-]+)$'
+            fact: "AWS IAM role: {1}"
+            type: high_signal
+      - name: imds_creds
+        tool: shell
+        args:
+          command: "TOKEN=$(curl -s -X PUT --max-time 5 http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' 2>/dev/null) && ROLE=$(curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/iam/security-credentials/ 2>/dev/null | head -1) && curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/iam/security-credentials/$ROLE 2>&1 || echo 'failed'"
+          timeout: 15
+        save_as: imds_creds
+        description: "Extract IAM credentials from IMDS"
+        on_error: continue
+        extract_facts:
+          - pattern: '"AccessKeyId":\s*"([^"]+)"'
+            fact: "AWS access key: {1}"
+            type: high_signal
+          - pattern: '"Code":\s*"Success"'
+            fact: "AWS credentials available via IMDS"
+            type: high_signal
+
+  - name: s3_enum
+    description: "S3 bucket enumeration via nmap if target has S3-related ports"
+    condition: "fact_count('Port *') > 0"
+    steps:
+      - name: nmap_s3_check
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "80,443"
+          scripts: "http-title"
+        save_as: s3_check
+        description: "Check for S3 endpoints"
+        timeout: 60
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)([\w.-]+)\.s3[.-]amazonaws\.com'
+            fact: "S3 bucket: {1}"
+            type: high_signal
+          - pattern: '(?i)<?xml.*<Name>([^<]+)</Name>'
+            fact: "S3 bucket name: {1}"
+            type: high_signal
+
+gates:
+  - name: on_aws
+    condition: "fact_count('AWS*') > 0"
+    on_fail: "Not running on AWS EC2 or IMDS is blocked"
+    severity: info
+  - name: imds_v1_exposed
+    condition: "fact_count('AWS IMDSv1 exposed*') > 0"
+    on_fail: "IMDSv1 not exposed (good - it's vulnerable)"
+    severity: info
+  - name: iam_creds_exposed
+    condition: "fact_count('AWS access key*') > 0 or fact_count('AWS credentials available*') > 0"
+    on_fail: "No IAM credentials extracted via IMDS"
+    severity: info

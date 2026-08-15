@@ -1,0 +1,79 @@
+name: subdomain-enumeration
+description: "Subdomain enumeration via DNS, brute force, and certificate transparency"
+tags: [recon, subdomain, dns, enumeration]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap]
+
+phases:
+  - name: zone_transfer_check
+    description: "Check for DNS zone transfer vulnerability"
+    steps:
+      - name: nmap_dns_zone
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "53"
+          scripts: "dns-zone-transfer"
+        save_as: zone_transfer
+        description: "DNS zone transfer check"
+        timeout: 60
+        on_error: continue
+        extract_facts:
+          - pattern: '(\S+)\s+IN\s+(?:A|CNAME|MX|NS)'
+            fact: "Subdomain (via zone transfer): {1}"
+            type: high_signal
+          - pattern: 'zone transfer.*success'
+            fact: "Zone transfer ALLOWED - DNS misconfiguration"
+            type: high_signal
+
+  - name: dns_brute
+    description: "DNS brute force for common subdomain names"
+    condition: "has_fact('53/tcp') or has_fact('53/udp')"
+    steps:
+      - name: nmap_dns_brute
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "53"
+          scripts: "dns-brute"
+        save_as: dns_brute
+        description: "DNS brute force enumeration"
+        timeout: 180
+        on_error: continue
+        extract_facts:
+          - pattern: '([a-zA-Z0-9-]+)\.[a-zA-Z0-9.-]+\s+(?:IN\s+)?A\s+(\d+\.\d+\.\d+\.\d+)'
+            fact: "Subdomain: {1} -> {2}"
+            type: high_signal
+          - pattern: '([a-zA-Z0-9-]+)\.[a-zA-Z0-9.-]+\s+(?:IN\s+)?CNAME\s+(.+)'
+            fact: "Subdomain CNAME: {1} -> {2}"
+            type: high_signal
+
+  - name: reverse_dns
+    description: "Reverse DNS lookups for nearby IPs"
+    condition: "fact_count('Subdomain*') > 0"
+    steps:
+      - name: nmap_reverse
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "53"
+          scripts: "hostmap-ipct,ptr"
+        save_as: reverse_dns
+        description: "Reverse DNS for host discovery"
+        timeout: 120
+        on_error: continue
+        extract_facts:
+          - pattern: '(\d+\.\d+\.\d+\.\d+).*->\s*(\S+)'
+            fact: "Reverse DNS: {1} -> {2}"
+            type: high_signal
+
+gates:
+  - name: dns_found
+    condition: "has_fact('53/tcp') or has_fact('53/udp') or fact_count('Subdomain*') > 0"
+    on_fail: "No DNS service found"
+    severity: warning
+  - name: zone_transfer_risk
+    condition: "fact_count('Zone transfer*') > 0"
+    on_fail: "Zone transfer not allowed (good)"
+    severity: info

@@ -1,0 +1,120 @@
+name: docker-enumeration
+description: "Docker container and registry enumeration"
+tags: [docker, container, registry, cloud, enumeration]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap, shell]
+
+phases:
+  - name: docker_port_scan
+    description: "Scan for Docker daemon (2375/2376) and registry (5000/5001)"
+    steps:
+      - name: nmap_docker_ports
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "2375,2376,5000,5001,8443,9200,9090"
+          service_detection: true
+        save_as: docker_port_scan
+        description: "Docker port scan"
+        timeout: 120
+        on_error: continue
+        extract_facts:
+          - pattern: '(\d+)/tcp\s+open\s+(\S+)'
+            fact: "Port {1}/tcp open: {2}"
+            type: high_signal
+
+  - name: docker_api_check
+    description: "Check for unauthenticated Docker API"
+    condition: "has_fact('2375/tcp') or has_fact('2376/tcp')"
+    steps:
+      - name: docker_api_query
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 http://{target}:2375/version 2>&1 || echo 'Connection failed'"
+          timeout: 15
+        save_as: docker_api_response
+        description: "Query Docker API without authentication"
+        on_error: continue
+        extract_facts:
+          - pattern: '"Version":\s*"([\d.]+)"'
+            fact: "Docker version: {1}"
+            type: high_signal
+          - pattern: '"ApiVersion":\s*"([\d.]+)"'
+            fact: "Docker API version: {1}"
+            type: high_signal
+          - pattern: '"Os":\s*"([^"]+)"'
+            fact: "Docker host OS: {1}"
+            type: high_signal
+          - pattern: '"Arch":\s*"([^"]+)"'
+            fact: "Docker host arch: {1}"
+            type: observation
+
+  - name: docker_registry_check
+    description: "Check for open Docker registry"
+    condition: "has_fact('5000/tcp') or has_fact('5001/tcp')"
+    steps:
+      - name: registry_v2_check
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 -I http://{target}:5000/v2/ 2>&1 || echo 'Connection failed'"
+          timeout: 15
+        save_as: registry_response
+        description: "Check for Docker Registry v2 API"
+        on_error: continue
+        extract_facts:
+          - pattern: 'Docker-Distribution-ApiVersion:\s*registry/([\d.]+)'
+            fact: "Docker registry version: {1}"
+            type: high_signal
+          - pattern: '200\s+OK'
+            fact: "Docker registry open (no auth)"
+            type: high_signal
+          - pattern: '401\s+Unauthorized'
+            fact: "Docker registry requires auth"
+            type: observation
+      - name: registry_catalog
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 http://{target}:5000/v2/_catalog 2>&1 || echo 'Connection failed'"
+          timeout: 15
+        save_as: registry_catalog
+        description: "Enumerate Docker registry catalog"
+        on_error: continue
+        extract_facts:
+          - pattern: '"([^"]+)"'
+            fact: "Docker image: {1}"
+            type: high_signal
+
+  - name: es_check
+    description: "Check for Elasticsearch (often runs in Docker)"
+    condition: "has_fact('9200/tcp')"
+    steps:
+      - name: elasticsearch_query
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 http://{target}:9200/ 2>&1 || echo 'Connection failed'"
+          timeout: 15
+        save_as: es_response
+        description: "Query Elasticsearch API"
+        on_error: continue
+        extract_facts:
+          - pattern: '"cluster_name":\s*"([^"]+)"'
+            fact: "ES cluster: {1}"
+            type: high_signal
+          - pattern: '"version":\s*:\s*"([\d.]+)"'
+            fact: "Elasticsearch version: {1}"
+            type: high_signal
+
+gates:
+  - name: docker_ports_found
+    condition: "fact_count('Port *') > 0"
+    on_fail: "No Docker-related ports found"
+    severity: info
+  - name: docker_api_open
+    condition: "fact_count('Docker version*') > 0"
+    on_fail: "Docker API not exposed or requires TLS"
+    severity: warning
+  - name: registry_open
+    condition: "fact_count('Docker registry*') > 0"
+    on_fail: "No open Docker registry detected"
+    severity: info

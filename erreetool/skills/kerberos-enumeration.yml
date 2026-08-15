@@ -1,0 +1,86 @@
+name: kerberos-enumeration
+description: "Kerberos user enumeration and AS-REP roasting detection"
+tags: [kerberos, ad, active-directory, enumeration, as-rep]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap]
+
+phases:
+  - name: kerberos_discovery
+    description: "Detect Kerberos service (port 88)"
+    steps:
+      - name: nmap_kerberos
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "88,464,49669,49670"
+          service_detection: true
+        save_as: kerberos_scan
+        description: "Kerberos port scan"
+        timeout: 120
+        on_error: continue
+        extract_facts:
+          - pattern: '(\d+)/tcp\s+open\s+(\S+)'
+            fact: "Port {1}/tcp open: {2}"
+            type: high_signal
+
+  - name: kerberos_enum
+    description: "Enumerate Kerberos users via NSE scripts"
+    condition: "has_fact('88/tcp')"
+    steps:
+      - name: nmap_kerb_enum
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "88"
+          scripts: "krb5-enum-users"
+        save_as: kerb_enum
+        description: "Kerberos user enumeration"
+        timeout: 180
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)Valid\s+username:\s*(\S+)'
+            fact: "Kerberos user valid: {1}"
+            type: high_signal
+          - pattern: '(?i)user:\s*(\S+).*Discovered'
+            fact: "Kerberos user exists: {1}"
+            type: high_signal
+          - pattern: '(?i)Pre-auth.*required'
+            fact: "Kerberos pre-auth required for some users"
+            type: observation
+
+  - name: as_rep_roast_check
+    description: "Check for AS-REP-roastable accounts (DontRequirePreAuth)"
+    condition: "fact_count('Kerberos user*') > 0"
+    steps:
+      - name: nmap_as_rep
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "88"
+          scripts: "krb5-enum-users"
+        save_as: as_rep_check
+        description: "AS-REP roasting check"
+        timeout: 180
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)(\S+).*does not require pre-auth'
+            fact: "AS-REP roastable user: {1}"
+            type: high_signal
+          - pattern: '(?i)no pre-auth'
+            fact: "Kerberos accounts vulnerable to AS-REP roasting"
+            type: high_signal
+
+gates:
+  - name: kerb_found
+    condition: "has_fact('88/tcp')"
+    on_fail: "No Kerberos service found - may not be a DC"
+    severity: warning
+  - name: users_found
+    condition: "fact_count('Kerberos user*') > 0"
+    on_fail: "No Kerberos users enumerated"
+    severity: info
+  - name: asrep_risk
+    condition: "fact_count('AS-REP*') > 0"
+    on_fail: "No AS-REP roastable accounts found (good)"
+    severity: info

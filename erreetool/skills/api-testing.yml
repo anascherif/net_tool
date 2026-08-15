@@ -1,0 +1,157 @@
+name: api-testing
+description: "REST API security testing - authentication, injection, and misconfiguration"
+tags: [api, rest, web, security, injection]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap, shell]
+
+phases:
+  - name: api_discovery
+    description: "Discover API endpoints and documentation"
+    steps:
+      - name: nmap_api_ports
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "80,443,8080,8443,8000,3000,5000"
+          service_detection: true
+        save_as: api_port_scan
+        description: "Scan common API ports"
+        timeout: 120
+        on_error: continue
+        extract_facts:
+          - pattern: '(\d+)/tcp\s+open\s+(\S+)'
+            fact: "Port {1}/tcp open: {2}"
+            type: high_signal
+      - name: check_openapi
+        tool: shell
+        args:
+          command: "for path in /openapi.json /swagger.json /api-docs /v1/api.json /api/v1/swagger.json /docs; do echo \"=== $path ===\"; curl -s --max-time 5 -I http://{target}$path 2>&1 | head -5; done || echo 'failed'"
+          timeout: 60
+        save_as: openapi_check
+        description: "Check for OpenAPI/Swagger documentation"
+        on_error: continue
+        extract_facts:
+          - pattern: '===\s*(/\S+)\s*===\s*\n(200|301)'
+            fact: "API docs at: {1}"
+            type: high_signal
+          - pattern: '(?i)content-type:\s*application/json'
+            fact: "JSON API detected"
+            type: observation
+
+  - name: auth_test
+    description: "Test authentication mechanisms"
+    condition: "fact_count('Port *') > 0"
+    steps:
+      - name: check_no_auth
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://{target}/ 2>&1"
+          timeout: 15
+        save_as: root_no_auth
+        description: "Check if root endpoint requires auth"
+        on_error: continue
+        extract_facts:
+          - pattern: '^(200)$'
+            fact: "No auth: root endpoint returns 200"
+            type: high_signal
+          - pattern: '^(401|403)$'
+            fact: "Auth required (good): root endpoint"
+            type: observation
+      - name: jwt_check
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 -I http://{target}/ 2>&1 | grep -i 'authorization\\|bearer' || echo 'no jwt'"
+          timeout: 15
+        save_as: jwt_check
+        description: "Check for JWT auth"
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)authorization:\s*bearer'
+            fact: "JWT auth detected"
+            type: high_signal
+
+  - name: injection_test
+    description: "Test for common API injection points"
+    condition: "fact_count('JSON API*') > 0 or fact_count('API docs*') > 0 or fact_count('Port *') > 0"
+    steps:
+      - name: no_sql_injection
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 -H 'Content-Type: application/json' -d '{\"username\":{\"$ne\":null},\"password\":{\"$ne\":null}}' http://{target}/api/login 2>&1 | head -20 || echo 'failed'"
+          timeout: 15
+        save_as: nosql_test
+        description: "Test NoSQL authentication bypass"
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)(token|success|authenticated|logged in)'
+            fact: "NoSQL injection likely: auth bypass"
+            type: high_signal
+      - name: graphql_check
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 -H 'Content-Type: application/json' -d '{\"query\":\"{__schema{types{name}}}\"}' http://{target}/graphql 2>&1 | head -50 || echo 'no graphql'"
+          timeout: 15
+        save_as: graphql_introspect
+        description: "GraphQL introspection check"
+        on_error: continue
+        extract_facts:
+          - pattern: '"name":"(\w+)"'
+            fact: "GraphQL type: {1}"
+            type: high_signal
+          - pattern: '__schema'
+            fact: "GraphQL introspection enabled"
+            type: high_signal
+
+  - name: misconfig_test
+    description: "Check for common API misconfigurations"
+    condition: "fact_count('Port *') > 0"
+    steps:
+      - name: cors_check
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 -H 'Origin: http://evil.com' -I http://{target}/ 2>&1 | grep -i 'access-control' || echo 'no cors'"
+          timeout: 15
+        save_as: cors
+        description: "Check CORS configuration"
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)access-control-allow-origin:\s*(.+)'
+            fact: "CORS allows: {1}"
+            type: high_signal
+          - pattern: '(?i)access-control-allow-credentials:\s*true'
+            fact: "CORS allows credentials"
+            type: high_signal
+      - name: http_methods
+        tool: shell
+        args:
+          command: "curl -s --max-time 10 -X OPTIONS -I http://{target}/ 2>&1 | grep -i 'allow' || echo 'no options'"
+          timeout: 15
+        save_as: http_methods
+        description: "Check allowed HTTP methods"
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)allow:\s*(.+)'
+            fact: "HTTP methods allowed: {1}"
+            type: high_signal
+          - pattern: '(?i)\b(DELETE|PUT|TRACE)\b'
+            fact: "Dangerous method allowed: {1}"
+            type: high_signal
+
+gates:
+  - name: api_found
+    condition: "fact_count('Port *') > 0"
+    on_fail: "No API ports found"
+    severity: info
+  - name: docs_exposed
+    condition: "fact_count('API docs*') > 0"
+    on_fail: "No API documentation exposed (good)"
+    severity: info
+  - name: auth_risk
+    condition: "fact_count('No auth*') > 0"
+    on_fail: "Endpoints require authentication (healthy)"
+    severity: info
+  - name: injection_risk
+    condition: "fact_count('NoSQL injection*') > 0 or fact_count('GraphQL*') > 0"
+    on_fail: "No obvious injection points found"
+    severity: info

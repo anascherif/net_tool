@@ -1,0 +1,95 @@
+name: ldap-enumeration
+description: "Standalone LDAP enumeration - users, groups, and directory structure"
+tags: [ldap, enumeration, directory, ad]
+author: erreetool
+version: "1.0"
+requires_tools: [nmap]
+
+phases:
+  - name: ldap_discovery
+    description: "Detect LDAP service (389, 636, 3268)"
+    steps:
+      - name: nmap_ldap_ports
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "389,636,3268"
+          service_detection: true
+        save_as: ldap_discovery
+        description: "LDAP port scan"
+        timeout: 120
+        on_error: continue
+        extract_facts:
+          - pattern: '(\d+)/tcp\s+open\s+(\S+)'
+            fact: "Port {1}/tcp open: {2}"
+            type: high_signal
+
+  - name: rootdse_enum
+    description: "RootDSE query for directory information"
+    condition: "has_fact('389/tcp') or has_fact('636/tcp') or has_fact('3268/tcp')"
+    steps:
+      - name: nmap_rootdse
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "389"
+          scripts: "ldap-rootdse"
+        save_as: rootdse
+        description: "LDAP RootDSE query"
+        timeout: 60
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)rootDomainNamingContext:\s*(.+)'
+            fact: "LDAP naming context: {1}"
+            type: high_signal
+          - pattern: '(?i)defaultNamingContext:\s*(.+)'
+            fact: "LDAP default context: {1}"
+            type: high_signal
+          - pattern: '(?i)namingContexts:\s*(.+)'
+            fact: "LDAP context: {1}"
+            type: high_signal
+          - pattern: '(?i)forestName:\s*(.+)'
+            fact: "AD forest: {1}"
+            type: high_signal
+          - pattern: '(?i)domainControllerFunctionality:\s*(.+)'
+            fact: "DC level: {1}"
+            type: observation
+
+  - name: ldap_search
+    description: "LDAP search for users and groups"
+    condition: "fact_count('LDAP*') > 0"
+    steps:
+      - name: nmap_ldap_search
+        tool: nmap
+        args:
+          target: "{target}"
+          ports: "389"
+          scripts: "ldap-search"
+        save_as: ldap_search
+        description: "LDAP search for users and groups"
+        timeout: 180
+        on_error: continue
+        extract_facts:
+          - pattern: '(?i)cn=([^,\s]+)[^]]*objectClass=user'
+            fact: "LDAP user: {1}"
+            type: high_signal
+          - pattern: '(?i)cn=([^,\s]+)[^]]*objectClass=group'
+            fact: "LDAP group: {1}"
+            type: high_signal
+          - pattern: '(?i)cn=([^,\s]+)[^]]*objectClass=computer'
+            fact: "LDAP computer: {1}"
+            type: high_signal
+
+gates:
+  - name: ldap_found
+    condition: "has_fact('389/tcp') or has_fact('636/tcp') or has_fact('3268/tcp')"
+    on_fail: "No LDAP service found"
+    severity: info
+  - name: ldap_queries_ok
+    condition: "fact_count('LDAP*') > 0"
+    on_fail: "LDAP discovery scan returned no parseable info"
+    severity: warning
+  - name: users_found
+    condition: "fact_count('LDAP user*') > 0 or fact_count('LDAP computer*') > 0"
+    on_fail: "No users/computers found - may need valid credentials"
+    severity: info
