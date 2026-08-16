@@ -22,6 +22,7 @@ from erreetool.agent.providers import MultiProvider, LLMMessage, TOOL_DEFINITION
 from erreetool.agent.tools.base import tool_registry, ToolResult
 from erreetool.agent.skills import SkillExecutor, SkillRegistry, skill_registry
 from erreetool.agent.memory import memory_retriever, RetrievedContext, memory_store, MemoryType, SessionSummary
+from erreetool.agent.safety import SafetyGate, SafetyPolicy, RiskLevel, ApprovalResponse, ApprovalPrompt
 
 console = Console()
 
@@ -41,6 +42,14 @@ class AgentConfig:
     # Memory
     use_memory: bool = True  # Load relevant past sessions
     memory_max_sessions: int = 5
+    # Safety gate (Phase 6)
+    use_safety_gate: bool = True  # If True, classify and prompt for risky actions
+    non_interactive: bool = True  # If True, never prompt - auto-deny dangerous
+    # Exploitation verification (Phase 6)
+    allow_exploitation: bool = False  # Master switch for exploit verification
+    # Human-in-the-loop (Phase 6)
+    human_in_loop: bool = False  # If True, prompt before every tool call
+
 
 
 class AgentLoop:
@@ -113,6 +122,16 @@ RULES:
         self.config = config or AgentConfig()
         self.step_count = 0
         self.start_time = time.time()
+        
+        # Safety gate (Phase 6)
+        self.safety_gate = None
+        if self.config.use_safety_gate:
+            self.safety_gate = SafetyGate(
+                SafetyPolicy(
+                    non_interactive=self.config.non_interactive,
+                    auto_approve_below=RiskLevel.MODERATE,
+                )
+            )
         
         # Tool executor mapping
         self.tool_executors = {
@@ -565,6 +584,26 @@ RULES:
         for tc in tool_calls:
             func_name = tc["function"]["name"]
             func_args = json.loads(tc["function"]["arguments"])
+            
+            # Safety gate check (Phase 6)
+            if self.safety_gate:
+                allowed, classification, response = self.safety_gate.check(
+                    func_name.replace("run_", ""),  # tool name without prefix
+                    func_args
+                )
+                if not allowed:
+                    error = f"Safety gate blocked {func_name}: {classification.reason}"
+                    console.print(f"[yellow]{error}[/yellow]")
+                    self.state.add_evidence(
+                        EvidenceType.OBSERVATION,
+                        "safety_gate",
+                        error,
+                        {"risk": classification.risk.value, "response": response.value if response else "auto"}
+                    )
+                    continue
+                if response == ApprovalResponse.ABORT:
+                    console.print("[red]User aborted assessment via safety gate.[/red]")
+                    return
             
             # Create step
             step = self.state.add_step(

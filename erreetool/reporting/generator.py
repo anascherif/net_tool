@@ -1,7 +1,8 @@
 """
 Report generator for agent sessions.
 
-Creates professional Markdown/HTML reports from AgentState.
+Creates professional Markdown/HTML/JSON reports from AgentState.
+Includes MITRE ATT&CK mapping and attack path analysis (Phase 6).
 """
 
 import json
@@ -10,6 +11,12 @@ from pathlib import Path
 from typing import Optional
 
 from erreetool.agent.state import AgentState, EvidenceType
+from erreetool.agent.mitre import (
+    map_findings_batch,
+    generate_mitre_heatmap,
+    generate_mitre_technique_table,
+)
+from erreetool.agent.attack_path import find_attack_paths, AttackPath
 
 
 class ReportGenerator:
@@ -46,9 +53,19 @@ class ReportGenerator:
         return filepath
     
     def _generate_markdown(self, state: AgentState) -> str:
-        """Generate Markdown report."""
+        """Generate Markdown report with MITRE ATT&CK and attack paths (Phase 6)."""
         summary = state.get_summary()
         ctx = state.context
+        
+        # Phase 6: Generate MITRE mappings and attack paths
+        mitre_mappings = []
+        if ctx.high_signal_facts:
+            finding_types = ["finding"] * len(ctx.high_signal_facts)
+            mitre_mappings = map_findings_batch(ctx.high_signal_facts, finding_types)
+        
+        attack_paths = []
+        if mitre_mappings:
+            attack_paths = find_attack_paths(state, max_depth=6, min_score=1.0)
         
         lines = [
             f"# Penetration Test Report",
@@ -84,8 +101,43 @@ class ReportGenerator:
             f"| Failed | {summary.get('steps_failed', 0)} |",
             f"| Evidence Collected | {summary.get('evidence_total', 0)} |",
             f"| High-Signal Facts | {summary.get('high_signal_facts', 0)} |",
+            f"| MITRE Techniques Mapped | {len(set(t.id for m in mitre_mappings for t in m.techniques))} |",
+            f"| Attack Paths Found | {len(attack_paths)} |",
             f"",
         ])
+        
+        # Phase 6: MITRE ATT&CK Heatmap
+        if mitre_mappings:
+            lines.extend([
+                f"## MITRE ATT&CK Mapping",
+                f"",
+                generate_mitre_heatmap(mitre_mappings),
+                f"",
+                f"### Top Techniques",
+                f"",
+                generate_mitre_technique_table(mitre_mappings),
+                f"",
+            ])
+        
+        # Phase 6: Attack Paths
+        if attack_paths:
+            lines.extend([
+                f"## Attack Paths",
+                f"",
+                f"Potential attack paths from initial access to high-value objectives:",
+                f"",
+            ])
+            for i, path in enumerate(attack_paths[:5], 1):
+                lines.extend([
+                    f"### Path {i}: {path.objective} (Risk: {path.risk_score:.1f})",
+                    f"",
+                    f"**MITRE Techniques:** {', '.join(path.mitre_techniques) if path.mitre_techniques else 'N/A'}",
+                    f"",
+                    f"**Sequence:**",
+                ])
+                for j, node in enumerate(path.nodes, 1):
+                    lines.append(f"  {j}. [{node.type.value}] {node.label} (score: {node.score:.1f})")
+                lines.append("")
         
         # High-signal facts
         if ctx.high_signal_facts:

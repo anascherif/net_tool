@@ -739,5 +739,125 @@ def test_all_new_skills_executor_integration():
             assert len(phase.steps) > 0, f"Phase {phase.name} has no steps in {skill_file}"
 
 
+# ===== Phase 6: Attack Path & MITRE Tests =====
+
+def test_attack_graph_builder():
+    """Test attack graph builder creates nodes and edges."""
+    from erreetool.agent.attack_path import AttackGraphBuilder, NodeType, EdgeType
+    
+    state = AgentState()
+    state.context.target = "192.168.1.100"
+    state.add_high_signal_fact("Port 445/tcp open: smb")
+    state.add_high_signal_fact("Vulnerability found: CVE-2021-34527")
+    
+    builder = AttackGraphBuilder(state)
+    graph = builder.build()
+    
+    assert len(graph.nodes) >= 3  # host, service, vuln
+    assert len(graph.edges) >= 2  # host->service, host->vuln
+    
+    node_ids = list(graph.nodes.keys())
+    assert f"host:192.168.1.100" in node_ids
+    assert any("service" in nid for nid in node_ids)
+    assert any("vuln" in nid for nid in node_ids)
+
+
+def test_attack_path_finding():
+    """Test attack path finding from host to objectives."""
+    from erreetool.agent.attack_path import find_attack_paths
+    
+    state = AgentState()
+    state.context.target = "192.168.1.100"
+    state.add_high_signal_fact("Port 445/tcp open: smb")
+    state.add_high_signal_fact("Port 3389/tcp open: rdp")
+    state.add_high_signal_fact("Vulnerability found: CVE-2021-34527")
+    state.add_high_signal_fact("AS-REP roastable user: john")
+    state.add_high_signal_fact("SQL injection vulnerability detected")
+    state.add_high_signal_fact("Docker API exposed on 2375/tcp")
+    
+    paths = find_attack_paths(state, max_depth=6, min_score=1.0)
+    assert len(paths) >= 1
+    
+    # Check path structure
+    for path in paths:
+        assert len(path.nodes) >= 2
+        assert path.objective in ("vulnerability exploitation", "credential access", "configuration access")
+        assert path.risk_score > 0
+
+
+def test_mitre_mapping():
+    """Test MITRE ATT&CK mapping from findings."""
+    from erreetool.agent.mitre import map_finding_to_mitre, map_findings_batch
+    
+    # Test single finding
+    mapping = map_finding_to_mitre("Port 445/tcp open: smb", "service")
+    assert len(mapping.techniques) > 0
+    assert any(t.id == "T1021.002" for t in mapping.techniques)
+    assert "lateral-movement" in mapping.primary_tactic
+    
+    # Test batch
+    findings = [
+        "Port 445/tcp open: smb",
+        "Vulnerability: CVE-2021-34527",
+        "AS-REP roastable: john",
+    ]
+    types = ["service", "vulnerability", "credential"]
+    mappings = map_findings_batch(findings, types)
+    assert len(mappings) == 3
+    
+    # Check technique IDs
+    all_tech_ids = set()
+    for m in mappings:
+        for t in m.techniques:
+            all_tech_ids.add(t.id)
+    assert "T1021.002" in all_tech_ids  # SMB
+    assert "T1190" in all_tech_ids or "T1068" in all_tech_ids  # CVE
+    assert "T1558.004" in all_tech_ids  # AS-REP
+
+
+def test_mitre_report_helpers():
+    """Test MITRE report generation helpers."""
+    from erreetool.agent.mitre import (
+        map_findings_batch,
+        generate_mitre_heatmap,
+        generate_mitre_technique_table,
+    )
+    
+    findings = [
+        "Port 445/tcp open: smb",
+        "Port 3389/tcp open: rdp",
+        "CVE-2021-34527",
+    ]
+    types = ["service", "service", "vulnerability"]
+    mappings = map_findings_batch(findings, types)
+    
+    heatmap = generate_mitre_heatmap(mappings)
+    assert "Initial Access" in heatmap or "Lateral Movement" in heatmap
+    
+    table = generate_mitre_technique_table(mappings)
+    assert "Technique ID" in table
+    assert "T1021" in table or "T1190" in table
+
+
+def test_report_includes_mitre_and_paths():
+    """Test report generator includes MITRE and attack paths."""
+    from erreetool.agent.state import AgentState
+    from erreetool.reporting.generator import ReportGenerator
+    
+    state = AgentState()
+    state.context.target = "192.168.1.100"
+    state.add_high_signal_fact("Port 445/tcp open: smb")
+    state.add_high_signal_fact("Vulnerability: CVE-2021-34527")
+    
+    gen = ReportGenerator()
+    report_path = gen.generate(state, format="markdown")
+    
+    with open(report_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    assert "MITRE ATT&CK Mapping" in content
+    assert "Attack Paths" in content or "Attack Paths Found" in content
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
