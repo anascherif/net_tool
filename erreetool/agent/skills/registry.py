@@ -242,4 +242,8 @@ class SkillRegistry:
 
 
 # Global registry instance
-skill_registry = SkillRegistry()
+def get_skill_registry():
+    from erreetool.agent.skills.loader import skill_loader
+    return SkillRegistry(loader=skill_loader)
+
+skill_registry = get_skill_registry()
