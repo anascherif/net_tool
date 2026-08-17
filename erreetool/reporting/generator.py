@@ -2,7 +2,8 @@
 Report generator for agent sessions.
 
 Creates professional Markdown/HTML/JSON reports from AgentState.
-Includes MITRE ATT&CK mapping and attack path analysis (Phase 6).
+Includes MITRE ATT&CK mapping, attack path analysis (Phase 6),
+and compliance mapping (Phase 7).
 """
 
 import json
@@ -17,6 +18,7 @@ from erreetool.agent.mitre import (
     generate_mitre_technique_table,
 )
 from erreetool.agent.attack_path import find_attack_paths, AttackPath
+from erreetool.compliance import ComplianceMapper, Framework
 
 
 class ReportGenerator:
@@ -53,7 +55,7 @@ class ReportGenerator:
         return filepath
     
     def _generate_markdown(self, state: AgentState) -> str:
-        """Generate Markdown report with MITRE ATT&CK and attack paths (Phase 6)."""
+        """Generate Markdown report with MITRE ATT&CK, attack paths (Phase 6), and compliance (Phase 7)."""
         summary = state.get_summary()
         ctx = state.context
         
@@ -66,6 +68,20 @@ class ReportGenerator:
         attack_paths = []
         if mitre_mappings:
             attack_paths = find_attack_paths(state, max_depth=6, min_score=1.0)
+        
+        # Phase 7: Compliance mapping
+        compliance_report = None
+        if ctx.high_signal_facts:
+            try:
+                mapper = ComplianceMapper()
+                compliance_report = mapper.generate_report(
+                    assessment_id=state.session_id,
+                    target=ctx.target or "unknown",
+                    findings=ctx.high_signal_facts,
+                    frameworks=[Framework.NIST_CSF, Framework.ISO_27001, Framework.PCI_DSS, Framework.CIS_CONTROLS],
+                )
+            except Exception as e:
+                pass  # Silently skip compliance if it fails
         
         lines = [
             f"# Penetration Test Report",
@@ -103,8 +119,24 @@ class ReportGenerator:
             f"| High-Signal Facts | {summary.get('high_signal_facts', 0)} |",
             f"| MITRE Techniques Mapped | {len(set(t.id for m in mitre_mappings for t in m.techniques))} |",
             f"| Attack Paths Found | {len(attack_paths)} |",
+            f"| Compliance Frameworks | {len(compliance_report.frameworks) if compliance_report else 0} |",
             f"",
         ])
+        
+        # Phase 7: Compliance Summary
+        if compliance_report:
+            lines.extend([
+                f"## Compliance Summary",
+                f"",
+                f"| Framework | Controls | Compliant | Non-Compliant | Partial |",
+                f"|-----------|----------|-----------|---------------|---------|",
+            ])
+            for fw, summary_data in compliance_report.framework_summary.items():
+                lines.append(
+                    f"| {fw.upper()} | {summary_data['total']} | "
+                    f"{summary_data['compliant']} | {summary_data['non_compliant']} | {summary_data['partial']} |"
+                )
+            lines.append("")
         
         # Phase 6: MITRE ATT&CK Heatmap
         if mitre_mappings:

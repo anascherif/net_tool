@@ -1,0 +1,178 @@
+# GitLab CI/CD Configuration for ERREETOOL
+
+stages:
+  - lint
+  - test
+  - security
+  - build
+  - deploy
+
+variables:
+  PYTHON_VERSION: "3.12"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .pip-cache/
+    - .venv/
+
+before_script:
+  - python -m pip install --upgrade pip
+  - pip install -r requirements.txt
+
+# ===== Lint Stage =====
+ruff_lint:
+  stage: lint
+  image: python:${PYTHON_VERSION}
+  script:
+    - pip install ruff
+    - ruff check erreetool/ tests/
+  allow_failure: false
+
+ruff_format:
+  stage: lint
+  image: python:${PYTHON_VERSION}
+  script:
+    - pip install ruff
+    - ruff format --check erreetool/ tests/
+  allow_failure: false
+
+mypy_check:
+  stage: lint
+  image: python:${PYTHON_VERSION}
+  script:
+    - pip install mypy
+    - mypy erreetool/ --ignore-missing-imports
+  allow_failure: false
+
+# ===== Test Stage =====
+unit_tests:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  services:
+    - name: postgres:15
+      alias: postgres
+  variables:
+    POSTGRES_DB: erreetool_test
+    POSTGRES_USER: test
+    POSTGRES_PASSWORD: test
+  script:
+    - pip install pytest pytest-cov pytest-asyncio
+    - pytest tests/ -v --cov=erreetool --cov-report=xml --cov-report=term
+  coverage: '/TOTAL.*\s+(\d+\%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - coverage.xml
+    expire_in: 1 week
+
+integration_tests:
+  stage: test
+  image: python:${PYTHON_VERSION}
+  script:
+    - apt-get update && apt-get install -y nmap nuclei whatweb gobuster sqlmap
+    - pip install pytest pytest-asyncio
+    - pytest tests/ -v -k "integration" --tb=short
+  allow_failure: true
+  variables:
+    OPENROUTER_API_KEY: $OPENROUTER_API_KEY
+    GROQ_API_KEY: $GROQ_API_KEY
+
+# ===== Security Stage =====
+bandit_scan:
+  stage: security
+  image: python:${PYTHON_VERSION}
+  script:
+    - pip install bandit
+    - bandit -r erreetool/ -f json -o bandit-report.json || true
+  artifacts:
+    reports:
+      sast: bandit-report.json
+    expire_in: 1 week
+
+safety_check:
+  stage: security
+  image: python:${PYTHON_VERSION}
+  script:
+    - pip install safety
+    - safety check --json --output safety-report.json || true
+  artifacts:
+    reports:
+      dependency_scanning: safety-report.json
+    expire_in: 1 week
+
+# ===== Build Stage =====
+build_package:
+  stage: build
+  image: python:${PYTHON_VERSION}
+  script:
+    - pip install build twine
+    - python -m build
+    - twine check dist/*
+  artifacts:
+    paths:
+      - dist/*
+    expire_in: 1 week
+  only:
+    - main
+    - tags
+
+docker_build:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_IMAGE: $CI_REGISTRY_IMAGE/erreetool
+  script:
+    - docker build -t $DOCKER_IMAGE:$CI_COMMIT_SHA -t $DOCKER_IMAGE:latest .
+    - docker run --rm $DOCKER_IMAGE:$CI_COMMIT_SHA python -m erreetool.cli --help
+  only:
+    - main
+    - tags
+
+# ===== Deploy Stage =====
+pypi_publish:
+  stage: deploy
+  image: python:${PYTHON_VERSION}
+  script:
+    - pip install twine
+    - twine upload dist/* -u __token__ -p $PYPI_API_TOKEN
+  only:
+    - tags
+  when: manual
+
+docker_push:
+  stage: deploy
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_IMAGE: $CI_REGISTRY_IMAGE/erreetool
+  script:
+    - echo $CI_REGISTRY_PASSWORD | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
+    - docker push $DOCKER_IMAGE:$CI_COMMIT_SHA
+    - docker push $DOCKER_IMAGE:latest
+  only:
+    - main
+    - tags
+  when: manual
+
+# ===== Pages (Documentation) =====
+pages:
+  stage: deploy
+  image: python:${PYTHON_VERSION}
+  script:
+    - pip install mkdocs mkdocs-material
+    - mkdocs build --site-dir public
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
