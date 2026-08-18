@@ -2,25 +2,23 @@
 Skill CLI commands for managing pentest skills.
 """
 
-import typer
 from pathlib import Path
-from typing import Optional
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.syntax import Syntax
 
-from erreetool.agent.skills import skill_loader, skill_registry
-from erreetool.agent.skills.schema import Skill
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from erreetool.agent.skills import skill_loader
 
 console = Console()
 
 
 def run(
     subcommand: str = typer.Argument("list", help="Subcommand: list, show, validate"),
-    name: str = typer.Option(None, "--name", "-n", help="Skill name for show command"),
-    file: str = typer.Option(None, "--file", "-f", help="Skill YAML file for validate"),
-    tag: str = typer.Option(None, "--tag", "-t", help="Filter by tag"),
+    name: str = typer.Option(None, "--name", help="Skill name for show command"),
+    file: str = typer.Option(None, "--file", help="Skill YAML file for validate"),
+    tag: str = typer.Option(None, "--tag", help="Filter by tag"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
     """Manage pentest skills.
@@ -50,7 +48,7 @@ def run(
         console.print("Available: list, show, validate")
 
 
-def _list_skills(tag: Optional[str] = None, verbose: bool = False):
+def _list_skills(tag: str | None = None, verbose: bool = False):
     """List all available skills."""
     if tag:
         skills = skill_loader.list_by_tag(tag)
@@ -73,7 +71,11 @@ def _list_skills(tag: Optional[str] = None, verbose: bool = False):
     for skill in skills:
         tags_str = ", ".join(skill.tags)
         tools_str = ", ".join(skill.requires_tools)
-        desc = skill.description[:60] + "..." if len(skill.description) > 60 else skill.description
+        desc = (
+            skill.description[:60] + "..."
+            if len(skill.description) > 60
+            else skill.description
+        )
         table.add_row(skill.name, tags_str, tools_str, desc)
 
     console.print(table)
@@ -90,18 +92,20 @@ def _show_skill(name: str):
         return
 
     # Basic info
-    console.print(Panel(
-        f"[bold]Name:[/bold] {skill.name}\n"
-        f"[bold]Description:[/bold] {skill.description}\n"
-        f"[bold]Version:[/bold] {skill.version}\n"
-        f"[bold]Author:[/bold] {skill.author}\n"
-        f"[bold]Tags:[/bold] {', '.join(skill.tags) or 'none'}\n"
-        f"[bold]Requires:[/bold] {', '.join(skill.requires_tools) or 'none'}\n"
-        f"[bold]Phases:[/bold] {len(skill.phases)}\n"
-        f"[bold]Gates:[/bold] {len(skill.gates)}",
-        title=f"Skill: {skill.name}",
-        border_style="cyan"
-    ))
+    console.print(
+        Panel(
+            f"[bold]Name:[/bold] {skill.name}\n"
+            f"[bold]Description:[/bold] {skill.description}\n"
+            f"[bold]Version:[/bold] {skill.version}\n"
+            f"[bold]Author:[/bold] {skill.author}\n"
+            f"[bold]Tags:[/bold] {', '.join(skill.tags) or 'none'}\n"
+            f"[bold]Requires:[/bold] {', '.join(skill.requires_tools) or 'none'}\n"
+            f"[bold]Phases:[/bold] {len(skill.phases)}\n"
+            f"[bold]Gates:[/bold] {len(skill.gates)}",
+            title=f"Skill: {skill.name}",
+            border_style="cyan",
+        )
+    )
 
     # Phases
     for i, phase in enumerate(skill.phases, 1):
@@ -116,14 +120,20 @@ def _show_skill(name: str):
             console.print(f"  [green]->[/green] {step.name}: {step.tool}{args_str}")
             if step.extract_facts:
                 for fe in step.extract_facts:
-                    console.print(f"    [dim]Fact: {fe.fact_template} (type: {fe.fact_type})[/dim]")
+                    console.print(
+                        f"    [dim]Fact: {fe.fact_template} (type: {fe.fact_type})[/dim]"
+                    )
 
     # Gates
     if skill.gates:
         console.print("\n[bold]Verification Gates:[/bold]")
         for gate in skill.gates:
-            sev_color = {"error": "red", "warning": "yellow", "info": "blue"}.get(gate.severity, "white")
-            console.print(f"  [{sev_color}]{gate.severity.upper()}[/{sev_color}] {gate.name}: {gate.condition}")
+            sev_color = {"error": "red", "warning": "yellow", "info": "blue"}.get(
+                gate.severity, "white"
+            )
+            console.print(
+                f"  [{sev_color}]{gate.severity.upper()}[/{sev_color}] {gate.name}: {gate.condition}"
+            )
             if gate.on_fail:
                 console.print(f"    [dim]On fail: {gate.on_fail}[/dim]")
 
@@ -137,28 +147,34 @@ def _validate_skill(file_path: str):
 
     try:
         import yaml
+
         with open(path) as f:
             data = yaml.safe_load(f)
 
         from erreetool.agent.skills.schema import parse_skill
+
         skill = parse_skill(data, source_file=str(path))
 
-        console.print(Panel(
-            f"[green]OK Valid skill: {skill.name}[/green]\n"
-            f"  Phases: {len(skill.phases)}\n"
-            f"  Steps: {sum(len(p.steps) for p in skill.phases)}\n"
-            f"  Gates: {len(skill.gates)}\n"
-            f"  Tools: {', '.join(skill.requires_tools) or 'none'}",
-            title="Validation Success",
-            border_style="green"
-        ))
+        console.print(
+            Panel(
+                f"[green]OK Valid skill: {skill.name}[/green]\n"
+                f"  Phases: {len(skill.phases)}\n"
+                f"  Steps: {sum(len(p.steps) for p in skill.phases)}\n"
+                f"  Gates: {len(skill.gates)}\n"
+                f"  Tools: {', '.join(skill.requires_tools) or 'none'}",
+                title="Validation Success",
+                border_style="green",
+            )
+        )
 
     except Exception as e:
-        console.print(Panel(
-            f"[red]Invalid skill: {e}[/red]",
-            title="Validation Failed",
-            border_style="red"
-        ))
+        console.print(
+            Panel(
+                f"[red]Invalid skill: {e}[/red]",
+                title="Validation Failed",
+                border_style="red",
+            )
+        )
 
 
 if __name__ == "__main__":

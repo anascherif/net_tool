@@ -55,8 +55,10 @@ def _parse_unix_ping(output: str) -> dict:
 
 def run(
     target: str = typer.Argument(..., help="Target hostname or IP address."),
-    count: int = typer.Option(4, "--count", "-c", help="Number of echo requests."),
-    explain: bool = typer.Option(False, "--explain", is_flag=True, help="Show human-friendly explanation."),
+    count: int = typer.Option(4, "--count", help="Number of echo requests."),
+    explain: bool = typer.Option(
+        False, "--explain", is_flag=True, help="Show human-friendly explanation."
+    ),
 ) -> None:
     if is_windows():
         cmd = ["ping", "-n", str(count), "-w", "1000", target]
@@ -90,4 +92,5 @@ def run(
 
     if explain:
         from erreetool.utils.explanations import show_explanation
+
         show_explanation("ping")
