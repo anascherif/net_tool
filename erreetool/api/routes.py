@@ -17,10 +17,10 @@ from erreetool.agent.state import AgentState
 from erreetool.api.auth import (
     UserInDB,
     create_access_token,
-    get_current_user,
-    get_password_hash,
-    verify_password,
     create_user,
+    get_current_user,
+    require_permission,
+    verify_password,
 )
 from erreetool.api.models import (
     AssessmentRequest,
@@ -495,6 +495,13 @@ async def create_bulk_assessments(
             skill=request.skill,
             skill_mode=request.skill_mode,
             max_steps=request.max_steps,
+            full=False,
+            offline=False,
+            use_memory=True,
+            use_safety_gate=True,
+            non_interactive=True,
+            allow_exploitation=False,
+            human_in_loop=False,
         )
 
         assessment_id = str(uuid.uuid4())
@@ -562,7 +569,24 @@ async def create_campaign(
 
     _campaigns[campaign_id] = campaign
 
-    return CampaignResponse(**campaign)
+    return CampaignResponse(
+        campaign_id=campaign["campaign_id"],
+        name=campaign["name"],
+        description=campaign.get("description"),
+        targets=campaign["targets"],
+        goal=campaign.get("goal"),
+        schedule=campaign.get("schedule"),
+        skill_mode=campaign["skill_mode"],
+        max_steps=campaign["max_steps"],
+        enabled=campaign["enabled"],
+        created_at=campaign["created_at"],
+        updated_at=campaign["updated_at"],
+        last_run=campaign.get("last_run"),
+        next_run=campaign.get("next_run"),
+        status=campaign.get("status", "created"),
+        total_assessments=campaign.get("total_assessments", 0),
+        completed_assessments=campaign.get("completed_assessments", 0),
+    )
 
 
 @router.get("/campaigns", response_model=CampaignListResponse)
@@ -574,7 +598,27 @@ async def list_campaigns(
     campaigns.sort(key=lambda x: x["created_at"], reverse=True)
 
     return CampaignListResponse(
-        campaigns=[CampaignResponse(**c) for c in campaigns],
+        campaigns=[
+            CampaignResponse(
+                campaign_id=c["campaign_id"],
+                name=c["name"],
+                description=c.get("description"),
+                targets=c["targets"],
+                goal=c.get("goal"),
+                schedule=c.get("schedule"),
+                skill_mode=c["skill_mode"],
+                max_steps=c["max_steps"],
+                enabled=c["enabled"],
+                created_at=c["created_at"],
+                updated_at=c["updated_at"],
+                last_run=c.get("last_run"),
+                next_run=c.get("next_run"),
+                status=c.get("status", "created"),
+                total_assessments=c.get("total_assessments", 0),
+                completed_assessments=c.get("completed_assessments", 0),
+            )
+            for c in campaigns
+        ],
         total=len(campaigns),
     )
 
@@ -589,7 +633,24 @@ async def get_campaign(
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    return CampaignResponse(**campaign)
+    return CampaignResponse(
+        campaign_id=campaign["campaign_id"],
+        name=campaign["name"],
+        description=campaign.get("description"),
+        targets=campaign["targets"],
+        goal=campaign.get("goal"),
+        schedule=campaign.get("schedule"),
+        skill_mode=campaign["skill_mode"],
+        max_steps=campaign["max_steps"],
+        enabled=campaign["enabled"],
+        created_at=campaign["created_at"],
+        updated_at=campaign["updated_at"],
+        last_run=campaign.get("last_run"),
+        next_run=campaign.get("next_run"),
+        status=campaign.get("status", "created"),
+        total_assessments=campaign.get("total_assessments", 0),
+        completed_assessments=campaign.get("completed_assessments", 0),
+    )
 
 
 @router.post("/campaigns/{campaign_id}/run")
@@ -620,6 +681,15 @@ async def run_campaign(
             goal=campaign.get("goal"),
             skill_mode=campaign["skill_mode"],
             max_steps=campaign["max_steps"],
+            full=False,
+            quick=True,
+            offline=False,
+            skill=None,
+            use_memory=True,
+            use_safety_gate=True,
+            non_interactive=True,
+            allow_exploitation=False,
+            human_in_loop=False,
         )
 
         assessment_id = str(uuid.uuid4())
@@ -749,10 +819,12 @@ async def list_memory_sessions(
 ):
     """List stored memory sessions."""
     from erreetool.agent.memory import memory_store
+    from erreetool.agent.memory.schema import MemoryType, SessionSummary
 
     memory_store.load()
 
-    sessions = list(memory_store._sessions.values())
+    entries = memory_store.get_by_type(MemoryType.SESSION_SUMMARY, limit=limit * 2)
+    sessions = [SessionSummary.from_dict(e.content) for e in entries]
 
     if target:
         sessions = [s for s in sessions if s.target == target]
@@ -787,10 +859,12 @@ async def list_finding_patterns(
 ):
     """List finding patterns from memory."""
     from erreetool.agent.memory import memory_store
+    from erreetool.agent.memory.schema import FindingPattern, MemoryType
 
     memory_store.load()
 
-    patterns = list(memory_store._patterns.values())
+    entries = memory_store.get_by_type(MemoryType.FINDING_PATTERN, limit=100)
+    patterns = [FindingPattern.from_dict(e.content) for e in entries]
 
     if pattern_type:
         patterns = [p for p in patterns if p.pattern_type == pattern_type]
