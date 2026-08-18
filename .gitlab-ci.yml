@@ -131,7 +131,7 @@ docker_build:
     DOCKER_IMAGE: $CI_REGISTRY_IMAGE/erreetool
   script:
     - docker build -t $DOCKER_IMAGE:$CI_COMMIT_SHA -t $DOCKER_IMAGE:latest .
-    - docker run --rm $DOCKER_IMAGE:$CI_COMMIT_SHA python -m erreetool.cli --help
+    - docker run --rm $DOCKER_IMAGE:$CI_COMMIT_SHA --help
   only:
     - main
     - tags

@@ -211,7 +211,7 @@ jobs:
 
       - name: Test Docker image
         run: |
-          docker run --rm erreetool/erreetool:latest python -m erreetool.cli --help
+          docker run --rm erreetool/erreetool:latest --help
 
   # ===== Notify =====
   notify:
