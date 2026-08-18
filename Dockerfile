@@ -26,7 +26,6 @@ WORKDIR /app
 COPY pyproject.toml .
 COPY requirements.txt .
 COPY erreetool/ ./erreetool/
-COPY skills/ ./skills/
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
