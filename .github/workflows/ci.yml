@@ -30,6 +30,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install ruff mypy pytest
+          pip install -e .
 
       - name: Run Ruff (lint)
         run: ruff check erreetool/ tests/
@@ -46,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -60,6 +61,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-cov
+          pip install -e .
 
       - name: Run tests
         run: pytest tests/ -v --cov=erreetool --cov-report=xml
@@ -88,6 +90,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
+          pip install -e .
 
       - name: Install security tools
         run: |

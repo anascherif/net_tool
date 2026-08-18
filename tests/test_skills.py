@@ -1,25 +1,33 @@
 """Unit tests for skill engine: loader, schema, executor, registry."""
 
 import tempfile
-import pytest
 from pathlib import Path
 
-from erreetool.agent.skills.schema import (
-    Skill, SkillPhase, SkillStep, SkillGate, FactExtraction, SkillResult,
-    parse_skill, parse_phase, parse_step, parse_gate, parse_fact_extraction
-)
-from erreetool.agent.skills.loader import SkillLoader
-from erreetool.agent.skills.executor import SkillExecutor, ConditionEvaluator
-from erreetool.agent.skills.registry import SkillRegistry
-from erreetool.agent.state import AgentState, EvidenceType, AgentContext
-from erreetool.agent.tools.base import tool_registry, ToolWrapper, ToolResult
-from erreetool.agent.tools.crypto import CryptoTool
+import pytest
 
+from erreetool.agent.skills.executor import ConditionEvaluator, SkillExecutor
+from erreetool.agent.skills.loader import SkillLoader
+from erreetool.agent.skills.schema import (
+    FactExtraction,
+    Skill,
+    SkillGate,
+    SkillPhase,
+    SkillStep,
+    parse_fact_extraction,
+    parse_gate,
+    parse_phase,
+    parse_skill,
+    parse_step,
+)
+from erreetool.agent.state import AgentState
+from erreetool.agent.tools.base import ToolResult, ToolWrapper, tool_registry
 
 # ===== Fixtures =====
 
+
 class MockTool(ToolWrapper):
     """Mock tool for testing."""
+
     name = "mock"
     windows_binary = "mock.exe"
     linux_binary = "mock"
@@ -59,7 +67,7 @@ def temp_skill_dir():
 @pytest.fixture
 def sample_skill_yaml():
     """A sample skill YAML for testing."""
-    return """
+    return r"""
 name: test-skill
 description: "Test skill for unit tests"
 tags: [test, recon]
@@ -115,6 +123,7 @@ def state():
 
 # ===== Schema Tests =====
 
+
 def test_fact_extraction_parsing():
     data = {"pattern": "PORT: (\\d+)", "fact": "Port {1}", "type": "high_signal"}
     fe = parse_fact_extraction(data)
@@ -132,7 +141,7 @@ def test_step_parsing():
         "on_error": "abort",
         "extract_facts": [
             {"pattern": "PORT: (\\d+)", "fact": "Port {1}", "type": "high_signal"}
-        ]
+        ],
     }
     step = parse_step(data)
     assert step.name == "test_step"
@@ -148,9 +157,7 @@ def test_phase_parsing():
         "name": "recon",
         "description": "Recon phase",
         "condition": "True",
-        "steps": [
-            {"name": "s1", "tool": "mock", "args": {}}
-        ]
+        "steps": [{"name": "s1", "tool": "mock", "args": {}}],
     }
     phase = parse_phase(data)
     assert phase.name == "recon"
@@ -159,7 +166,12 @@ def test_phase_parsing():
 
 
 def test_gate_parsing():
-    data = {"name": "check", "condition": "fact_count('Port*') > 0", "on_fail": "none", "severity": "error"}
+    data = {
+        "name": "check",
+        "condition": "fact_count('Port*') > 0",
+        "on_fail": "none",
+        "severity": "error",
+    }
     gate = parse_gate(data)
     assert gate.name == "check"
     assert gate.severity == "error"
@@ -167,6 +179,7 @@ def test_gate_parsing():
 
 def test_full_skill_parsing(sample_skill_yaml):
     import yaml
+
     data = yaml.safe_load(sample_skill_yaml)
     skill = parse_skill(data, source_file="test.yml")
     assert skill.name == "test-skill"
@@ -191,6 +204,7 @@ def test_skill_to_dict():
 
 
 # ===== Loader Tests =====
+
 
 def test_loader_loads_skills(temp_skill_dir, sample_skill_yaml):
     (temp_skill_dir / "test-skill.yml").write_text(sample_skill_yaml)
@@ -227,6 +241,7 @@ def test_loader_list_by_tag(temp_skill_dir, sample_skill_yaml):
 
 # ===== Condition Evaluator Tests =====
 
+
 def test_condition_evaluator_empty():
     ctx = {"state": AgentState()}
     assert ConditionEvaluator.evaluate("", ctx) is True
@@ -253,8 +268,14 @@ def test_condition_evaluator_false():
 def test_condition_evaluator_evidence_contains():
     state = AgentState()
     ctx = {"state": state, "named_evidence": {"nmap_result": "80/tcp open  http"}}
-    assert ConditionEvaluator.evaluate("evidence_contains('nmap_result', '80/tcp')", ctx) is True
-    assert ConditionEvaluator.evaluate("evidence_contains('nmap_result', '443/tcp')", ctx) is False
+    assert (
+        ConditionEvaluator.evaluate("evidence_contains('nmap_result', '80/tcp')", ctx)
+        is True
+    )
+    assert (
+        ConditionEvaluator.evaluate("evidence_contains('nmap_result', '443/tcp')", ctx)
+        is False
+    )
 
 
 def test_condition_evaluator_forbidden_tokens():
@@ -276,6 +297,7 @@ def test_condition_evaluator_syntax_error():
 
 # ===== SkillExecutor Tests =====
 
+
 def test_executor_runs_simple_skill(state):
     """Test executor runs a skill with mock tool."""
     skill = Skill(
@@ -287,11 +309,16 @@ def test_executor_runs_simple_skill(state):
             SkillPhase(
                 name="phase1",
                 steps=[
-                    SkillStep(name="s1", tool="mock", args={"target": "{target}"}, save_as="out")
-                ]
+                    SkillStep(
+                        name="s1",
+                        tool="mock",
+                        args={"target": "{target}"},
+                        save_as="out",
+                    )
+                ],
             )
         ],
-        gates=[]
+        gates=[],
     )
 
     # Register mock tool
@@ -320,15 +347,22 @@ def test_executor_extracts_facts(state):
                 name="phase1",
                 steps=[
                     SkillStep(
-                        name="s1", tool="mock", args={}, save_as="out",
+                        name="s1",
+                        tool="mock",
+                        args={},
+                        save_as="out",
                         extract_facts=[
-                            FactExtraction(pattern="PORT: (\\d+)", fact_template="Port {1} found", fact_type="high_signal")
-                        ]
+                            FactExtraction(
+                                pattern="PORT: (\\d+)",
+                                fact_template="Port {1} found",
+                                fact_type="high_signal",
+                            )
+                        ],
                     )
-                ]
+                ],
             )
         ],
-        gates=[]
+        gates=[],
     )
 
     mock = MockTool(output="PORT: 80\nPORT: 443")
@@ -351,10 +385,16 @@ def test_executor_skips_phase_on_condition(state):
         tags=["test"],
         requires_tools=["mock"],
         phases=[
-            SkillPhase(name="phase1", steps=[SkillStep(name="s1", tool="mock", args={})]),
-            SkillPhase(name="phase2", condition="has_fact('Port 80')", steps=[SkillStep(name="s2", tool="mock", args={})]),
+            SkillPhase(
+                name="phase1", steps=[SkillStep(name="s1", tool="mock", args={})]
+            ),
+            SkillPhase(
+                name="phase2",
+                condition="has_fact('Port 80')",
+                steps=[SkillStep(name="s2", tool="mock", args={})],
+            ),
         ],
-        gates=[]
+        gates=[],
     )
 
     mock = MockTool(output="PORT: 443")
@@ -375,19 +415,36 @@ def test_executor_gates(state):
         tags=["test"],
         requires_tools=["mock"],
         phases=[
-            SkillPhase(name="phase1", steps=[
-                SkillStep(
-                    name="s1", tool="mock", args={}, save_as="out",
-                    extract_facts=[
-                        FactExtraction(pattern="PORT: (\\d+)", fact_template="Port {1}", fact_type="high_signal")
-                    ]
-                ),
-            ]),
+            SkillPhase(
+                name="phase1",
+                steps=[
+                    SkillStep(
+                        name="s1",
+                        tool="mock",
+                        args={},
+                        save_as="out",
+                        extract_facts=[
+                            FactExtraction(
+                                pattern="PORT: (\\d+)",
+                                fact_template="Port {1}",
+                                fact_type="high_signal",
+                            )
+                        ],
+                    ),
+                ],
+            ),
         ],
         gates=[
-            SkillGate(name="ports", condition="fact_count('Port *') > 0", on_fail="No ports", severity="warning"),
-            SkillGate(name="always", condition="True", on_fail="Never", severity="info"),
-        ]
+            SkillGate(
+                name="ports",
+                condition="fact_count('Port *') > 0",
+                on_fail="No ports",
+                severity="warning",
+            ),
+            SkillGate(
+                name="always", condition="True", on_fail="Never", severity="info"
+            ),
+        ],
     )
 
     mock = MockTool(output="PORT: 80")
@@ -408,11 +465,18 @@ def test_executor_failed_gate(state):
         tags=["test"],
         requires_tools=["mock"],
         phases=[
-            SkillPhase(name="phase1", steps=[SkillStep(name="s1", tool="mock", args={})]),
+            SkillPhase(
+                name="phase1", steps=[SkillStep(name="s1", tool="mock", args={})]
+            ),
         ],
         gates=[
-            SkillGate(name="ports", condition="fact_count('Port *') > 0", on_fail="No ports", severity="error"),
-        ]
+            SkillGate(
+                name="ports",
+                condition="fact_count('Port *') > 0",
+                on_fail="No ports",
+                severity="error",
+            ),
+        ],
     )
 
     mock = MockTool(output="nothing here")
@@ -434,12 +498,15 @@ def test_executor_error_handling_continue(state):
         tags=["test"],
         requires_tools=["mock"],
         phases=[
-            SkillPhase(name="phase1", steps=[
-                SkillStep(name="s1", tool="mock", args={}, on_error="continue"),
-                SkillStep(name="s2", tool="mock", args={}, on_error="continue"),
-            ]),
+            SkillPhase(
+                name="phase1",
+                steps=[
+                    SkillStep(name="s1", tool="mock", args={}, on_error="continue"),
+                    SkillStep(name="s2", tool="mock", args={}, on_error="continue"),
+                ],
+            ),
         ],
-        gates=[]
+        gates=[],
     )
 
     mock = MockTool(success=False, output="error")
@@ -461,12 +528,15 @@ def test_executor_error_handling_abort(state):
         tags=["test"],
         requires_tools=["mock"],
         phases=[
-            SkillPhase(name="phase1", steps=[
-                SkillStep(name="s1", tool="mock", args={}, on_error="abort"),
-                SkillStep(name="s2", tool="mock", args={}, on_error="continue"),
-            ]),
+            SkillPhase(
+                name="phase1",
+                steps=[
+                    SkillStep(name="s1", tool="mock", args={}, on_error="abort"),
+                    SkillStep(name="s2", tool="mock", args={}, on_error="continue"),
+                ],
+            ),
         ],
-        gates=[]
+        gates=[],
     )
 
     mock = MockTool(success=False, output="error")
@@ -482,6 +552,7 @@ def test_executor_error_handling_abort(state):
 
 # ===== SkillRegistry Tests =====
 
+
 def test_registry_scoring():
     """Test skill selection scoring."""
     # Create a skill with specific tags
@@ -491,25 +562,29 @@ def test_registry_scoring():
         tags=["web", "enum", "quick"],
         requires_tools=["whatweb"],
         phases=[SkillPhase(name="p1", steps=[])],
-        gates=[]
+        gates=[],
     )
 
     state = AgentState()
-    state.context.high_signal_facts = ["Port 80/tcp open: http", "Web server: nginx 1.18"]
+    state.context.high_signal_facts = [
+        "Port 80/tcp open: http",
+        "Web server: nginx 1.18",
+    ]
 
     # Need a real loader for this
     with tempfile.TemporaryDirectory() as tmpdir:
         skill_dir = Path(tmpdir)
         # We can't easily test full registry without real skills loaded
         # This is a placeholder for when skills are in place
-        pass
 
 
 # ===== Integration Test (crypto skill with real tool) =====
 
+
 def test_crypto_skill_integration():
     """Test crypto-analysis skill with real crypto tool."""
     import yaml
+
     skill_path = Path("erreetool/skills/crypto-analysis.yml")
     assert skill_path.exists()
 
@@ -535,9 +610,11 @@ def test_crypto_skill_integration():
 
 # ===== Integration Tests for New Skills (Phase 5) =====
 
+
 def test_ad_enumeration_skill():
     """Test AD enumeration skill parses correctly."""
     import yaml
+
     skill_path = Path("erreetool/skills/ad-enumeration.yml")
     assert skill_path.exists()
 
@@ -562,6 +639,7 @@ def test_ad_enumeration_skill():
 def test_ldap_enumeration_skill():
     """Test LDAP enumeration skill parses correctly."""
     import yaml
+
     skill_path = Path("erreetool/skills/ldap-enumeration.yml")
     assert skill_path.exists()
 
@@ -582,6 +660,7 @@ def test_ldap_enumeration_skill():
 def test_docker_enumeration_skill():
     """Test Docker enumeration skill parses correctly."""
     import yaml
+
     skill_path = Path("erreetool/skills/docker-enumeration.yml")
     assert skill_path.exists()
 
@@ -605,6 +684,7 @@ def test_docker_enumeration_skill():
 def test_cloud_aws_recon_skill():
     """Test AWS cloud recon skill parses correctly."""
     import yaml
+
     skill_path = Path("erreetool/skills/cloud-aws-recon.yml")
     assert skill_path.exists()
 
@@ -626,6 +706,7 @@ def test_cloud_aws_recon_skill():
 def test_privilege_escalation_skill():
     """Test privilege escalation skill parses correctly."""
     import yaml
+
     skill_path = Path("erreetool/skills/privilege-escalation.yml")
     assert skill_path.exists()
 
@@ -648,6 +729,7 @@ def test_privilege_escalation_skill():
 def test_api_testing_skill():
     """Test API testing skill parses correctly."""
     import yaml
+
     skill_path = Path("erreetool/skills/api-testing.yml")
     assert skill_path.exists()
 
@@ -671,6 +753,7 @@ def test_api_testing_skill():
 def test_subdomain_enumeration_skill():
     """Test subdomain enumeration skill parses correctly."""
     import yaml
+
     skill_path = Path("erreetool/skills/subdomain-enumeration.yml")
     assert skill_path.exists()
 
@@ -692,6 +775,7 @@ def test_subdomain_enumeration_skill():
 def test_kerberos_enumeration_skill():
     """Test Kerberos enumeration skill parses correctly."""
     import yaml
+
     skill_path = Path("erreetool/skills/kerberos-enumeration.yml")
     assert skill_path.exists()
 
@@ -713,6 +797,7 @@ def test_kerberos_enumeration_skill():
 def test_all_new_skills_executor_integration():
     """Test all new skills can be instantiated and executed with mock tools."""
     import yaml
+
     skill_files = [
         "ad-enumeration.yml",
         "ldap-enumeration.yml",
@@ -736,28 +821,31 @@ def test_all_new_skills_executor_integration():
         assert len(skill.phases) > 0
         # Each phase should have at least one step
         for phase in skill.phases:
-            assert len(phase.steps) > 0, f"Phase {phase.name} has no steps in {skill_file}"
+            assert len(phase.steps) > 0, (
+                f"Phase {phase.name} has no steps in {skill_file}"
+            )
 
 
 # ===== Phase 6: Attack Path & MITRE Tests =====
 
+
 def test_attack_graph_builder():
     """Test attack graph builder creates nodes and edges."""
-    from erreetool.agent.attack_path import AttackGraphBuilder, NodeType, EdgeType
-    
+    from erreetool.agent.attack_path import AttackGraphBuilder
+
     state = AgentState()
     state.context.target = "192.168.1.100"
     state.add_high_signal_fact("Port 445/tcp open: smb")
     state.add_high_signal_fact("Vulnerability found: CVE-2021-34527")
-    
+
     builder = AttackGraphBuilder(state)
     graph = builder.build()
-    
+
     assert len(graph.nodes) >= 3  # host, service, vuln
     assert len(graph.edges) >= 2  # host->service, host->vuln
-    
+
     node_ids = list(graph.nodes.keys())
-    assert f"host:192.168.1.100" in node_ids
+    assert "host:192.168.1.100" in node_ids
     assert any("service" in nid for nid in node_ids)
     assert any("vuln" in nid for nid in node_ids)
 
@@ -765,7 +853,7 @@ def test_attack_graph_builder():
 def test_attack_path_finding():
     """Test attack path finding from host to objectives."""
     from erreetool.agent.attack_path import find_attack_paths
-    
+
     state = AgentState()
     state.context.target = "192.168.1.100"
     state.add_high_signal_fact("Port 445/tcp open: smb")
@@ -774,27 +862,31 @@ def test_attack_path_finding():
     state.add_high_signal_fact("AS-REP roastable user: john")
     state.add_high_signal_fact("SQL injection vulnerability detected")
     state.add_high_signal_fact("Docker API exposed on 2375/tcp")
-    
+
     paths = find_attack_paths(state, max_depth=6, min_score=1.0)
     assert len(paths) >= 1
-    
+
     # Check path structure
     for path in paths:
         assert len(path.nodes) >= 2
-        assert path.objective in ("vulnerability exploitation", "credential access", "configuration access")
+        assert path.objective in (
+            "vulnerability exploitation",
+            "credential access",
+            "configuration access",
+        )
         assert path.risk_score > 0
 
 
 def test_mitre_mapping():
     """Test MITRE ATT&CK mapping from findings."""
     from erreetool.agent.mitre import map_finding_to_mitre, map_findings_batch
-    
+
     # Test single finding
     mapping = map_finding_to_mitre("Port 445/tcp open: smb", "service")
     assert len(mapping.techniques) > 0
     assert any(t.id == "T1021.002" for t in mapping.techniques)
     assert "lateral-movement" in mapping.primary_tactic
-    
+
     # Test batch
     findings = [
         "Port 445/tcp open: smb",
@@ -804,7 +896,7 @@ def test_mitre_mapping():
     types = ["service", "vulnerability", "credential"]
     mappings = map_findings_batch(findings, types)
     assert len(mappings) == 3
-    
+
     # Check technique IDs
     all_tech_ids = set()
     for m in mappings:
@@ -818,11 +910,11 @@ def test_mitre_mapping():
 def test_mitre_report_helpers():
     """Test MITRE report generation helpers."""
     from erreetool.agent.mitre import (
-        map_findings_batch,
         generate_mitre_heatmap,
         generate_mitre_technique_table,
+        map_findings_batch,
     )
-    
+
     findings = [
         "Port 445/tcp open: smb",
         "Port 3389/tcp open: rdp",
@@ -830,10 +922,10 @@ def test_mitre_report_helpers():
     ]
     types = ["service", "service", "vulnerability"]
     mappings = map_findings_batch(findings, types)
-    
+
     heatmap = generate_mitre_heatmap(mappings)
     assert "Initial Access" in heatmap or "Lateral Movement" in heatmap
-    
+
     table = generate_mitre_technique_table(mappings)
     assert "Technique ID" in table
     assert "T1021" in table or "T1190" in table
@@ -843,18 +935,18 @@ def test_report_includes_mitre_and_paths():
     """Test report generator includes MITRE and attack paths."""
     from erreetool.agent.state import AgentState
     from erreetool.reporting.generator import ReportGenerator
-    
+
     state = AgentState()
     state.context.target = "192.168.1.100"
     state.add_high_signal_fact("Port 445/tcp open: smb")
     state.add_high_signal_fact("Vulnerability: CVE-2021-34527")
-    
+
     gen = ReportGenerator()
     report_path = gen.generate(state, format="markdown")
-    
+
     with open(report_path, "r", encoding="utf-8") as f:
         content = f.read()
-    
+
     assert "MITRE ATT&CK Mapping" in content
     assert "Attack Paths" in content or "Attack Paths Found" in content
 
