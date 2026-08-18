@@ -8,7 +8,6 @@ MITRE ATT&CK techniques and tactics for compliance reporting.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 # Minimal MITRE ATT&CK dataset (enterprise matrix)
 # In production, this would be loaded from STIX or the official MITRE JSON
@@ -22,7 +21,12 @@ _MITRE_TECHNIQUES = {
     },
     "T1078": {
         "name": "Valid Accounts",
-        "tactics": ["initial-access", "persistence", "privilege-escalation", "defense-evasion"],
+        "tactics": [
+            "initial-access",
+            "persistence",
+            "privilege-escalation",
+            "defense-evasion",
+        ],
         "description": "Adversaries may obtain and abuse credentials of existing accounts.",
     },
     "T1133": {
@@ -202,16 +206,12 @@ _FINDING_TO_MITRE = {
     "rce": ["T1190", "T1210"],  # Remote code execution
     "lfi": ["T1190", "T1005"],  # Local file inclusion
     "rfi": ["T1190", "T1105"],  # Remote file inclusion
-
     # Services & open ports
     "smb": ["T1021.002", "T1021.004"],  # SMB, Pass the Hash
     "rdp": ["T1021.001"],  # RDP
     "winrm": ["T1021.006"],  # WinRM
-
     # Credential access
     "as-rep roastable": ["T1558.004"],  # AS-REP Roasting
-    "as_rep_roastable": ["T1558.004"],  # alias
-    "kerberoastable": ["T1558.003"],  # Kerberoasting
     "ssh": ["T1021", "T1003"],  # SSH, credential dumping
     "ldap": ["T1069", "T1482"],  # AD discovery
     "kerberos": ["T1558.003", "T1558.004"],  # Kerberoasting, AS-REP
@@ -220,7 +220,6 @@ _FINDING_TO_MITRE = {
     "postgresql": ["T1021", "T1003"],
     "vnc": ["T1021"],  # VNC
     "ftp": ["T1021", "T1005"],  # FTP
-
     # Web
     "web_shell": ["T1505.003"],  # Web shell
     "directory_traversal": ["T1005", "T1039"],
@@ -228,19 +227,16 @@ _FINDING_TO_MITRE = {
     "xss": ["T1190"],
     "csrf": ["T1190"],
     "cors_misconfig": ["T1190"],
-
     # Credentials
     "default_credentials": ["T1078"],
     "weak_password": ["T1078", "T1110"],
     "credential_dumping": ["T1003"],
     "as_rep_roastable": ["T1558.004"],
     "kerberoastable": ["T1558.003"],
-
     # Config
     "unquoted_service_path": ["T1574.009"],
     "always_install_elevated": ["T1548.002"],
     "writable_service": ["T1574.009"],
-
     # Cloud
     "imdsv1_exposed": ["T1082", "T1530"],  # AWS metadata
     "s3_bucket_open": ["T1005", "T1530"],  # Data from cloud storage
@@ -252,6 +248,7 @@ _FINDING_TO_MITRE = {
 @dataclass
 class MITRETechnique:
     """A MITRE ATT&CK technique."""
+
     id: str
     name: str
     tactics: list[str]
@@ -261,6 +258,7 @@ class MITRETechnique:
 @dataclass
 class MITREMapping:
     """A mapping from a finding to MITRE techniques."""
+
     finding: str
     finding_type: str
     techniques: list[MITRETechnique] = field(default_factory=list)
@@ -278,7 +276,7 @@ class MITREMapping:
         }
 
 
-def get_technique(technique_id: str) -> Optional[MITRETechnique]:
+def get_technique(technique_id: str) -> MITRETechnique | None:
     """Get a MITRE technique by ID."""
     if technique_id not in _MITRE_TECHNIQUES:
         return None
@@ -322,7 +320,9 @@ def map_finding_to_mitre(finding: str, finding_type: str = "") -> MITREMapping:
     for t in techniques:
         for tactic in t.tactics:
             tactic_counts[tactic] = tactic_counts.get(tactic, 0) + 1
-    primary_tactic = max(tactic_counts.items(), key=lambda x: x[1])[0] if tactic_counts else ""
+    primary_tactic = (
+        max(tactic_counts.items(), key=lambda x: x[1])[0] if tactic_counts else ""
+    )
 
     return MITREMapping(
         finding=finding,
@@ -332,7 +332,9 @@ def map_finding_to_mitre(finding: str, finding_type: str = "") -> MITREMapping:
     )
 
 
-def map_findings_batch(findings: list[str], types: list[str] = None) -> list[MITREMapping]:
+def map_findings_batch(
+    findings: list[str], types: list[str] = None
+) -> list[MITREMapping]:
     """Map multiple findings to MITRE ATT&CK."""
     if types is None:
         types = [""] * len(findings)
@@ -362,6 +364,7 @@ def get_technique_summary(mappings: list[MITREMapping]) -> dict[str, int]:
 # Report generation helpers
 # ============================================================
 
+
 def generate_mitre_heatmap(mappings: list[MITREMapping]) -> str:
     """Generate a markdown heatmap table for MITRE tactics."""
     tactic_counts = get_tactic_summary(mappings)
@@ -370,9 +373,18 @@ def generate_mitre_heatmap(mappings: list[MITREMapping]) -> str:
 
     # Tactic order (standard MITRE order)
     tactic_order = [
-        "initial-access", "execution", "persistence", "privilege-escalation",
-        "defense-evasion", "credential-access", "discovery", "lateral-movement",
-        "collection", "command-and-control", "exfiltration", "impact",
+        "initial-access",
+        "execution",
+        "persistence",
+        "privilege-escalation",
+        "defense-evasion",
+        "credential-access",
+        "discovery",
+        "lateral-movement",
+        "collection",
+        "command-and-control",
+        "exfiltration",
+        "impact",
     ]
 
     lines = [

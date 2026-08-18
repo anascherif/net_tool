@@ -1,60 +1,60 @@
 """
 API Routes - REST endpoints for the ERREETOOL API server.
 """
+
 import asyncio
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Any
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 
-from erreetool.api.models import (
-    AssessmentRequest,
-    AssessmentResponse,
-    AssessmentStatusResponse,
-    AssessmentStatusEnum,
-    AssessmentResult,
-    CampaignRequest,
-    CampaignResponse,
-    CampaignListResponse,
-    SkillRequest,
-    SkillListResponse,
-    SkillInfo,
-    HealthResponse,
-    UserCreate,
-    UserResponse,
-    Token,
-    TokenData,
-    BulkAssessmentRequest,
-)
+from erreetool.agent.loop import AgentConfig, AgentLoop
+from erreetool.agent.providers import MultiProvider
+from erreetool.agent.skills import skill_registry
+from erreetool.agent.state import AgentState
 from erreetool.api.auth import (
+    UserInDB,
     create_access_token,
     get_current_user,
     get_password_hash,
     verify_password,
-    check_permission,
-    require_permission,
-    UserInDB,
+    create_user,
 )
-from erreetool.agent.state import AgentState
-from erreetool.agent.loop import AgentLoop, AgentConfig
-from erreetool.agent.providers import MultiProvider
-from erreetool.agent.skills import skill_registry
+from erreetool.api.models import (
+    AssessmentRequest,
+    AssessmentResponse,
+    AssessmentResult,
+    AssessmentStatusEnum,
+    AssessmentStatusResponse,
+    BulkAssessmentRequest,
+    CampaignListResponse,
+    CampaignRequest,
+    CampaignResponse,
+    HealthResponse,
+    SkillInfo,
+    SkillListResponse,
+    SkillRequest,
+    Token,
+    UserCreate,
+    UserResponse,
+)
+from erreetool.config import (
+    OPENROUTER_API_KEY,
+)
 from erreetool.reporting.generator import ReportGenerator
-from erreetool.config import OPENROUTER_API_KEY, NVIDIA_NIM_API_KEY, GROQ_API_KEY, TOGETHER_API_KEY
 
 router = APIRouter()
 
 # In-memory storage (replace with database in production)
-_assessments: Dict[str, Dict] = {}
-_campaigns: Dict[str, Dict] = {}
-_assessment_tasks: Dict[str, asyncio.Task] = {}
+_assessments: dict[str, dict] = {}
+_campaigns: dict[str, dict] = {}
+_assessment_tasks: dict[str, asyncio.Task] = {}
 
 
 # ===== Health Check =====
+
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -73,6 +73,7 @@ async def health_check():
 
 # ===== Authentication =====
 
+
 @router.post("/auth/login", response_model=Token)
 async def login(username: str, password: str):
     """Login and get access token."""
@@ -83,20 +84,20 @@ async def login(username: str, password: str):
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user",
         )
-    
+
     # Update last login
     user.last_login = datetime.utcnow()
-    
+
     access_token = create_access_token(
         data={"sub": user.username, "user_id": user.id, "role": user.role}
     )
-    
+
     return Token(
         access_token=access_token,
         token_type="bearer",
@@ -105,14 +106,17 @@ async def login(username: str, password: str):
 
 
 @router.post("/auth/register", response_model=UserResponse)
-async def register(user_data: UserCreate, current_user: UserInDB = Depends(require_permission("admin:create"))):
+async def register(
+    user_data: UserCreate,
+    current_user: UserInDB = Depends(require_permission("admin:create")),
+):
     """Register a new user (admin only)."""
     if get_current_user(user_data.username):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already registered",
         )
-    
+
     user = create_user(
         username=user_data.username,
         email=user_data.email,
@@ -120,7 +124,7 @@ async def register(user_data: UserCreate, current_user: UserInDB = Depends(requi
         full_name=user_data.full_name,
         role=user_data.role,
     )
-    
+
     return UserResponse(
         id=user.id,
         username=user.username,
@@ -134,7 +138,9 @@ async def register(user_data: UserCreate, current_user: UserInDB = Depends(requi
 
 
 @router.get("/auth/me", response_model=UserResponse)
-async def get_me(current_user: UserInDB = Depends(require_permission("assessment:read"))):
+async def get_me(
+    current_user: UserInDB = Depends(require_permission("assessment:read")),
+):
     """Get current user info."""
     return UserResponse(
         id=current_user.id,
@@ -150,19 +156,22 @@ async def get_me(current_user: UserInDB = Depends(require_permission("assessment
 
 # ===== Assessments =====
 
+
 async def _run_assessment_background(assessment_id: str, request: AssessmentRequest):
     """Background task to run assessment."""
     assessment = _assessments[assessment_id]
     assessment["status"] = AssessmentStatusEnum.RUNNING
     assessment["updated_at"] = datetime.utcnow()
     assessment["started_at"] = datetime.utcnow()
-    
+
     try:
         # Initialize state
         state = AgentState()
         state.context.target = request.target
-        state.context.goals.append(request.goal or f"Penetration test on {request.target}")
-        
+        state.context.goals.append(
+            request.goal or f"Penetration test on {request.target}"
+        )
+
         # Get LLM provider
         provider = None
         if not request.offline:
@@ -170,7 +179,7 @@ async def _run_assessment_background(assessment_id: str, request: AssessmentRequ
                 provider = MultiProvider.from_env()
             except ValueError:
                 pass  # Continue without LLM
-        
+
         # Configure agent
         config = AgentConfig(
             max_steps=request.max_steps,
@@ -186,62 +195,70 @@ async def _run_assessment_background(assessment_id: str, request: AssessmentRequ
             allow_exploitation=request.allow_exploitation,
             human_in_loop=request.human_in_loop,
         )
-        
+
         loop = AgentLoop(state, provider, config) if provider or request.skill else None
-        
+
         if loop:
             final_state = loop.run(request.goal)
         else:
             # Offline mode
             final_state = _run_offline_assessment(state, request.target, request.quick)
-        
+
         # Generate report
         generator = ReportGenerator()
         report_path = generator.generate(final_state, format="markdown")
-        
+
         # Update assessment
         assessment["status"] = AssessmentStatusEnum.COMPLETED
         assessment["completed_at"] = datetime.utcnow()
         assessment["report_path"] = report_path
         assessment["high_signal_facts"] = final_state.context.high_signal_facts
         assessment["evidence_count"] = len(final_state.evidence_log)
-        assessment["steps_completed"] = len([s for s in final_state.steps if s.status.value == "completed"])
-        assessment["duration_seconds"] = (assessment["completed_at"] - assessment["started_at"]).total_seconds()
-        
+        assessment["steps_completed"] = len(
+            [s for s in final_state.steps if s.status.value == "completed"]
+        )
+        assessment["duration_seconds"] = (
+            assessment["completed_at"] - assessment["started_at"]
+        ).total_seconds()
+
     except Exception as e:
         assessment["status"] = AssessmentStatusEnum.FAILED
         assessment["error"] = str(e)
         assessment["completed_at"] = datetime.utcnow()
-    
+
     assessment["updated_at"] = datetime.utcnow()
 
 
 def _run_offline_assessment(state: AgentState, target: str, quick: bool) -> AgentState:
     """Run basic assessment without LLM."""
     from erreetool.agent.tools import tool_registry
-    
+
     # Run nmap
     nmap = tool_registry.get("nmap")
     if nmap and nmap.is_available():
         result = nmap.run(target=target, ports="top-100" if quick else "top-1000")
         if result.success:
             state.add_evidence(
-                "tool_output", "nmap", result.output,
-                {"command": result.command, "duration": result.duration}
+                "tool_output",
+                "nmap",
+                result.output,
+                {"command": result.command, "duration": result.duration},
             )
             _extract_nmap_facts(state, result.output)
-    
+
     # Run nuclei
     nuclei = tool_registry.get("nuclei")
     if nuclei and nuclei.is_available():
         result = nuclei.run(target=target, severity="critical,high" if quick else None)
         if result.success:
             state.add_evidence(
-                "tool_output", "nuclei", result.output,
-                {"command": result.command, "duration": result.duration}
+                "tool_output",
+                "nuclei",
+                result.output,
+                {"command": result.command, "duration": result.duration},
             )
             _extract_nuclei_facts(state, result.output)
-    
+
     state.context.current_phase = "complete"
     state.save()
     return state
@@ -249,18 +266,24 @@ def _run_offline_assessment(state: AgentState, target: str, quick: bool) -> Agen
 
 def _extract_nmap_facts(state: AgentState, output: str):
     import re
-    for match in re.finditer(r'(\d+)/tcp\s+open\s+(\S+)', output):
+
+    for match in re.finditer(r"(\d+)/tcp\s+open\s+(\S+)", output):
         port, service = match.groups()
         state.add_high_signal_fact(f"Port {port}/tcp open: {service}")
 
 
 def _extract_nuclei_facts(state: AgentState, output: str):
     import re
-    for match in re.finditer(r'CVE-\d{4}-\d{4,7}', output):
+
+    for match in re.finditer(r"CVE-\d{4}-\d{4,7}", output):
         state.add_high_signal_fact(f"Vulnerability: {match.group()}")
 
 
-@router.post("/assessments", response_model=AssessmentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/assessments",
+    response_model=AssessmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_assessment(
     request: AssessmentRequest,
     background_tasks: BackgroundTasks,
@@ -268,7 +291,7 @@ async def create_assessment(
 ):
     """Create and start a new assessment."""
     assessment_id = str(uuid.uuid4())
-    
+
     assessment = {
         "assessment_id": assessment_id,
         "target": request.target,
@@ -279,13 +302,13 @@ async def create_assessment(
         "created_by": current_user.username,
         "request": request.model_dump(),
     }
-    
+
     _assessments[assessment_id] = assessment
-    
+
     # Start background task
     task = asyncio.create_task(_run_assessment_background(assessment_id, request))
     _assessment_tasks[assessment_id] = task
-    
+
     return AssessmentResponse(
         assessment_id=assessment_id,
         status=AssessmentStatusEnum.PENDING,
@@ -295,22 +318,22 @@ async def create_assessment(
     )
 
 
-@router.get("/assessments", response_model=List[AssessmentStatusResponse])
+@router.get("/assessments", response_model=list[AssessmentStatusResponse])
 async def list_assessments(
-    status_filter: Optional[AssessmentStatusEnum] = None,
+    status_filter: AssessmentStatusEnum | None = None,
     limit: int = 50,
     offset: int = 0,
     current_user: UserInDB = Depends(require_permission("assessment:list")),
 ):
     """List all assessments."""
     assessments = list(_assessments.values())
-    
+
     if status_filter:
         assessments = [a for a in assessments if a["status"] == status_filter]
-    
+
     assessments.sort(key=lambda x: x["created_at"], reverse=True)
-    assessments = assessments[offset:offset + limit]
-    
+    assessments = assessments[offset : offset + limit]
+
     return [
         AssessmentStatusResponse(
             assessment_id=a["assessment_id"],
@@ -319,7 +342,11 @@ async def list_assessments(
             goal=a.get("goal"),
             created_at=a["created_at"],
             updated_at=a["updated_at"],
-            progress=1.0 if a["status"] == AssessmentStatusEnum.COMPLETED else 0.5 if a["status"] == AssessmentStatusEnum.RUNNING else 0.0,
+            progress=1.0
+            if a["status"] == AssessmentStatusEnum.COMPLETED
+            else 0.5
+            if a["status"] == AssessmentStatusEnum.RUNNING
+            else 0.0,
             steps_completed=a.get("steps_completed", 0),
             total_steps=a.get("request", {}).get("max_steps", 30),
             high_signal_facts=a.get("high_signal_facts", []),
@@ -340,7 +367,7 @@ async def get_assessment(
     assessment = _assessments.get(assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    
+
     return AssessmentStatusResponse(
         assessment_id=assessment["assessment_id"],
         status=assessment["status"],
@@ -348,7 +375,11 @@ async def get_assessment(
         goal=assessment.get("goal"),
         created_at=assessment["created_at"],
         updated_at=assessment["updated_at"],
-        progress=1.0 if assessment["status"] == AssessmentStatusEnum.COMPLETED else 0.5 if assessment["status"] == AssessmentStatusEnum.RUNNING else 0.0,
+        progress=1.0
+        if assessment["status"] == AssessmentStatusEnum.COMPLETED
+        else 0.5
+        if assessment["status"] == AssessmentStatusEnum.RUNNING
+        else 0.0,
         steps_completed=assessment.get("steps_completed", 0),
         total_steps=assessment.get("request", {}).get("max_steps", 30),
         high_signal_facts=assessment.get("high_signal_facts", []),
@@ -368,20 +399,25 @@ async def get_assessment_report(
     assessment = _assessments.get(assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    
+
     report_path = assessment.get("report_path")
     if not report_path or not Path(report_path).exists():
         raise HTTPException(status_code=404, detail="Report not found")
-    
+
     if format == "markdown":
-        return FileResponse(report_path, media_type="text/markdown", filename=f"report_{assessment_id}.md")
+        return FileResponse(
+            report_path,
+            media_type="text/markdown",
+            filename=f"report_{assessment_id}.md",
+        )
     elif format == "json":
-        import json
         with open(report_path, "r") as f:
             content = f.read()
         return {"content": content, "format": "markdown"}
     else:
-        raise HTTPException(status_code=400, detail="Invalid format. Use 'markdown' or 'json'")
+        raise HTTPException(
+            status_code=400, detail="Invalid format. Use 'markdown' or 'json'"
+        )
 
 
 @router.get("/assessments/{assessment_id}/result", response_model=AssessmentResult)
@@ -393,10 +429,10 @@ async def get_assessment_result(
     assessment = _assessments.get(assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    
+
     if assessment["status"] != AssessmentStatusEnum.COMPLETED:
         raise HTTPException(status_code=400, detail="Assessment not completed")
-    
+
     return AssessmentResult(
         assessment_id=assessment_id,
         target=assessment["target"],
@@ -423,22 +459,26 @@ async def cancel_assessment(
     assessment = _assessments.get(assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment not found")
-    
-    if assessment["status"] in [AssessmentStatusEnum.COMPLETED, AssessmentStatusEnum.FAILED, AssessmentStatusEnum.CANCELLED]:
+
+    if assessment["status"] in [
+        AssessmentStatusEnum.COMPLETED,
+        AssessmentStatusEnum.FAILED,
+        AssessmentStatusEnum.CANCELLED,
+    ]:
         raise HTTPException(status_code=400, detail="Assessment already finished")
-    
+
     # Cancel background task
     task = _assessment_tasks.get(assessment_id)
     if task and not task.done():
         task.cancel()
-    
+
     assessment["status"] = AssessmentStatusEnum.CANCELLED
     assessment["updated_at"] = datetime.utcnow()
-    
+
     return {"message": "Assessment cancelled"}
 
 
-@router.post("/assessments/bulk", response_model=List[AssessmentResponse])
+@router.post("/assessments/bulk", response_model=list[AssessmentResponse])
 async def create_bulk_assessments(
     request: BulkAssessmentRequest,
     background_tasks: BackgroundTasks,
@@ -446,7 +486,7 @@ async def create_bulk_assessments(
 ):
     """Create multiple assessments for multiple targets."""
     responses = []
-    
+
     for target in request.targets:
         assessment_request = AssessmentRequest(
             target=target,
@@ -456,7 +496,7 @@ async def create_bulk_assessments(
             skill_mode=request.skill_mode,
             max_steps=request.max_steps,
         )
-        
+
         assessment_id = str(uuid.uuid4())
         assessment = {
             "assessment_id": assessment_id,
@@ -468,33 +508,40 @@ async def create_bulk_assessments(
             "created_by": current_user.username,
             "request": assessment_request.model_dump(),
         }
-        
+
         _assessments[assessment_id] = assessment
-        
-        task = asyncio.create_task(_run_assessment_background(assessment_id, assessment_request))
+
+        task = asyncio.create_task(
+            _run_assessment_background(assessment_id, assessment_request)
+        )
         _assessment_tasks[assessment_id] = task
-        
-        responses.append(AssessmentResponse(
-            assessment_id=assessment_id,
-            status=AssessmentStatusEnum.PENDING,
-            message="Assessment queued for execution",
-            created_at=assessment["created_at"],
-            target=target,
-        ))
-    
+
+        responses.append(
+            AssessmentResponse(
+                assessment_id=assessment_id,
+                status=AssessmentStatusEnum.PENDING,
+                message="Assessment queued for execution",
+                created_at=assessment["created_at"],
+                target=target,
+            )
+        )
+
     return responses
 
 
 # ===== Campaigns =====
 
-@router.post("/campaigns", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/campaigns", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_campaign(
     request: CampaignRequest,
     current_user: UserInDB = Depends(require_permission("campaign:create")),
 ):
     """Create a new campaign."""
     campaign_id = str(uuid.uuid4())
-    
+
     campaign = {
         "campaign_id": campaign_id,
         "name": request.name,
@@ -512,9 +559,9 @@ async def create_campaign(
         "completed_assessments": 0,
         "status": "created",
     }
-    
+
     _campaigns[campaign_id] = campaign
-    
+
     return CampaignResponse(**campaign)
 
 
@@ -525,7 +572,7 @@ async def list_campaigns(
     """List all campaigns."""
     campaigns = list(_campaigns.values())
     campaigns.sort(key=lambda x: x["created_at"], reverse=True)
-    
+
     return CampaignListResponse(
         campaigns=[CampaignResponse(**c) for c in campaigns],
         total=len(campaigns),
@@ -541,7 +588,7 @@ async def get_campaign(
     campaign = _campaigns.get(campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    
+
     return CampaignResponse(**campaign)
 
 
@@ -549,24 +596,24 @@ async def get_campaign(
 async def run_campaign(
     campaign_id: str,
     background_tasks: BackgroundTasks,
-    target: Optional[str] = None,
+    target: str | None = None,
     current_user: UserInDB = Depends(require_permission("campaign:update")),
 ):
     """Run a campaign (all targets or single target)."""
     campaign = _campaigns.get(campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    
+
     targets = [target] if target else campaign["targets"]
-    
+
     # Update campaign status
     campaign["status"] = "running"
     campaign["updated_at"] = datetime.utcnow()
     campaign["total_assessments"] = len(targets)
     campaign["completed_assessments"] = 0
-    
+
     assessment_ids = []
-    
+
     for t in targets:
         assessment_request = AssessmentRequest(
             target=t,
@@ -574,7 +621,7 @@ async def run_campaign(
             skill_mode=campaign["skill_mode"],
             max_steps=campaign["max_steps"],
         )
-        
+
         assessment_id = str(uuid.uuid4())
         assessment = {
             "assessment_id": assessment_id,
@@ -587,13 +634,15 @@ async def run_campaign(
             "request": assessment_request.model_dump(),
             "campaign_id": campaign_id,
         }
-        
+
         _assessments[assessment_id] = assessment
         assessment_ids.append(assessment_id)
-        
-        task = asyncio.create_task(_run_assessment_background(assessment_id, assessment_request))
+
+        task = asyncio.create_task(
+            _run_assessment_background(assessment_id, assessment_request)
+        )
         _assessment_tasks[assessment_id] = task
-    
+
     return {
         "message": f"Campaign started with {len(targets)} assessments",
         "campaign_id": campaign_id,
@@ -603,17 +652,18 @@ async def run_campaign(
 
 # ===== Skills =====
 
+
 @router.get("/skills", response_model=SkillListResponse)
 async def list_skills(
-    tag: Optional[str] = None,
+    tag: str | None = None,
     current_user: UserInDB = Depends(require_permission("skill:list")),
 ):
     """List available skills."""
     skills = skill_registry.list_skills()
-    
+
     if tag:
         skills = [s for s in skills if tag in s.tags]
-    
+
     return SkillListResponse(
         skills=[
             SkillInfo(
@@ -641,7 +691,7 @@ async def get_skill(
     skill = skill_registry.get_skill(skill_name)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    
+
     return SkillInfo(
         name=skill.name,
         description=skill.description,
@@ -663,16 +713,17 @@ async def execute_skill(
     skill = skill_registry.get_skill(request.name)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    
+
     # Run skill
     state = AgentState()
     state.context.target = request.target
     state.context.goals.append(f"Execute skill {request.name} on {request.target}")
-    
+
     from erreetool.agent.skills import SkillExecutor
+
     executor = SkillExecutor(state)
     result = executor.execute(skill)
-    
+
     return {
         "success": result.success,
         "phases_executed": result.phases_executed,
@@ -689,24 +740,26 @@ async def execute_skill(
 
 # ===== Memory =====
 
+
 @router.get("/memory/sessions")
 async def list_memory_sessions(
-    target: Optional[str] = None,
+    target: str | None = None,
     limit: int = 20,
     current_user: UserInDB = Depends(require_permission("memory:list")),
 ):
     """List stored memory sessions."""
     from erreetool.agent.memory import memory_store
+
     memory_store.load()
-    
+
     sessions = list(memory_store._sessions.values())
-    
+
     if target:
         sessions = [s for s in sessions if s.target == target]
-    
+
     sessions.sort(key=lambda x: x.timestamp, reverse=True)
     sessions = sessions[:limit]
-    
+
     return {
         "sessions": [
             {
@@ -729,18 +782,19 @@ async def list_memory_sessions(
 
 @router.get("/memory/patterns")
 async def list_finding_patterns(
-    pattern_type: Optional[str] = None,
+    pattern_type: str | None = None,
     current_user: UserInDB = Depends(require_permission("memory:read")),
 ):
     """List finding patterns from memory."""
     from erreetool.agent.memory import memory_store
+
     memory_store.load()
-    
+
     patterns = list(memory_store._patterns.values())
-    
+
     if pattern_type:
         patterns = [p for p in patterns if p.pattern_type == pattern_type]
-    
+
     return {
         "patterns": [
             {
@@ -760,36 +814,39 @@ async def list_finding_patterns(
 
 # ===== Doctor/Diagnostics =====
 
+
 @router.get("/doctor")
 async def run_doctor(
     current_user: UserInDB = Depends(require_permission("assessment:read")),
 ):
     """Run diagnostic health check."""
-    from erreetool.commands.doctor import run as doctor_run
     import io
-    import sys
     from contextlib import redirect_stdout
-    
+
+    from erreetool.commands.doctor import run as doctor_run
+
     # Capture doctor output
     f = io.StringIO()
     with redirect_stdout(f):
         try:
             doctor_run(json_output=True)
-        except:
+        except Exception:
             pass
     output = f.getvalue()
-    
+
     return {"output": output}
 
 
 # ===== Export OpenAPI =====
 
+
 @router.get("/openapi.json")
 async def get_openapi():
     """Get OpenAPI schema."""
     from fastapi.openapi.utils import get_openapi
+
     from erreetool.api.server import app
-    
+
     return get_openapi(
         title="ERREETOOL API",
         version="1.0.0",

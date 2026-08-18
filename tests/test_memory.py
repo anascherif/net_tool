@@ -6,24 +6,23 @@ from pathlib import Path
 
 import pytest
 
+from erreetool.agent.memory.retriever import MemoryRetriever
 from erreetool.agent.memory.schema import (
+    ConfidenceLevel,
+    CredentialPattern,
+    CVEKnowledge,
+    FindingPattern,
     MemoryEntry,
     MemoryType,
     SessionSummary,
-    FindingPattern,
     ToolEffectiveness,
-    TargetProfile,
-    CVEKnowledge,
-    CredentialPattern,
-    ConfidenceLevel,
     generate_entry_id,
 )
 from erreetool.agent.memory.store import MemoryStore
-from erreetool.agent.memory.retriever import MemoryRetriever, RetrievedContext
-from erreetool.agent.state import AgentState, AgentContext, EvidenceType
-
+from erreetool.agent.state import AgentState
 
 # ===== Fixtures =====
+
 
 @pytest.fixture
 def temp_memory_dir():
@@ -55,6 +54,7 @@ def state():
 
 # ===== Schema Tests =====
 
+
 def test_generate_entry_id():
     """Test entry ID generation."""
     id1 = generate_entry_id("test")
@@ -81,7 +81,7 @@ def test_session_summary_serialization():
     data = summary.to_dict()
     assert data["session_id"] == "test_123"
     assert data["target"] == "10.0.0.1"
-    
+
     restored = SessionSummary.from_dict(data)
     assert restored.session_id == summary.session_id
     assert restored.target == summary.target
@@ -105,7 +105,7 @@ def test_finding_pattern_serialization():
     data = pattern.to_dict()
     assert data["pattern_type"] == "port"
     assert data["confidence"] == "high"
-    
+
     restored = FindingPattern.from_dict(data)
     assert restored.pattern_type == pattern.pattern_type
     assert restored.confidence == ConfidenceLevel.HIGH
@@ -125,6 +125,7 @@ def test_tool_effectiveness():
 
 # ===== Store Tests =====
 
+
 def test_store_add_and_get_session(store):
     """Test adding and retrieving session summary."""
     summary = SessionSummary(
@@ -135,11 +136,11 @@ def test_store_add_and_get_session(store):
         skills_run=["quick-triage"],
     )
     entry = store.add_session_summary(summary)
-    
+
     assert entry.memory_type == MemoryType.SESSION_SUMMARY
     assert "session" in entry.tags
     assert "10.0.0.1" in entry.tags
-    
+
     # Retrieve
     sessions = store.get_recent_sessions(10)
     assert len(sessions) == 1
@@ -159,7 +160,7 @@ def test_store_finding_pattern_deduplication(store):
         example_targets=["10.0.0.1"],
     )
     store.add_finding_pattern(pattern1)
-    
+
     # Add similar pattern - should merge (high indicator overlap)
     pattern2 = FindingPattern(
         pattern_id="pat_2",
@@ -171,8 +172,8 @@ def test_store_finding_pattern_deduplication(store):
         confidence=ConfidenceLevel.MEDIUM,
         example_targets=["10.0.0.2"],
     )
-    entry = store.add_finding_pattern(pattern2)
-    
+    _ = store.add_finding_pattern(pattern2)
+
     # Should have merged (same entry_id)
     patterns = store.get_by_type(MemoryType.FINDING_PATTERN)
     assert len(patterns) == 1
@@ -192,7 +193,7 @@ def test_store_tool_effectiveness(store):
         last_used=time.time(),
     )
     store.add_tool_effectiveness(eff)
-    
+
     # Add another run
     eff2 = ToolEffectiveness(
         tool_name="nmap",
@@ -204,7 +205,7 @@ def test_store_tool_effectiveness(store):
         last_used=time.time(),
     )
     store.add_tool_effectiveness(eff2)
-    
+
     # Check merged
     recs = store.get_tool_recommendations("web_nginx")
     assert len(recs) == 1
@@ -224,7 +225,7 @@ def test_store_cve_knowledge(store):
         confidence=ConfidenceLevel.VERIFIED,
     )
     store.add_cve_knowledge(cve)
-    
+
     retrieved = store.get_cve_knowledge("CVE-2021-44228")
     assert retrieved is not None
     assert retrieved.cve_id == "CVE-2021-44228"
@@ -244,7 +245,7 @@ def test_store_credential_patterns(store):
         attempted_count=5,
     )
     store.add_credential_pattern(pattern)
-    
+
     patterns = store.get_credential_patterns("ssh")
     assert len(patterns) == 1
     assert patterns[0].username == "admin"
@@ -261,15 +262,15 @@ def test_store_search(store):
         high_signal_facts=["Port 22 open: ssh", "CVE-2021-44228"],
     )
     store.add_session_summary(summary)
-    
+
     # Search by target
     results = store.search("192.168.50")
     assert len(results) == 1
-    
+
     # Search by CVE
     results = store.search("CVE-2021")
     assert len(results) == 1
-    
+
     # Search non-existent
     results = store.search("nonexistent")
     assert len(results) == 0
@@ -284,7 +285,7 @@ def test_store_clear(store):
         duration=5.0,
     )
     store.add_session_summary(summary)
-    
+
     assert len(store._entries) == 1
     store.clear(MemoryType.SESSION_SUMMARY)
     assert len(store._entries) == 0
@@ -302,17 +303,18 @@ def test_store_persistence(temp_memory_dir):
         duration=5.0,
     )
     store1.add_session_summary(summary)
-    
+
     # Create new store with same dir
     store2 = MemoryStore(memory_dir=temp_memory_dir)
     store2.load()
-    
+
     sessions = store2.get_recent_sessions(10)
     assert len(sessions) == 1
     assert sessions[0].session_id == "sess_persist"
 
 
 # ===== Retriever Tests =====
+
 
 def test_retriever_get_context(retriever, state):
     """Test retrieving context for assessment."""
@@ -328,7 +330,7 @@ def test_retriever_get_context(retriever, state):
             critical_findings=["CVE-2021-44228"],
         )
         retriever.store.add_session_summary(summary)
-    
+
     # Add finding pattern with example target that matches
     pattern = FindingPattern(
         pattern_id="pat_web",
@@ -341,29 +343,32 @@ def test_retriever_get_context(retriever, state):
         example_targets=["192.168.1.100"],  # Matches test target
     )
     retriever.store.add_finding_pattern(pattern)
-    
+
     # Get context
     context = retriever.get_context_for_assessment(
         target="192.168.1.100",
         state=state,
     )
-    
+
     assert len(context.relevant_sessions) > 0
     assert len(context.finding_patterns) > 0
-    assert "past session" in context.summary.lower() or "pattern" in context.summary.lower()
+    assert (
+        "past session" in context.summary.lower()
+        or "pattern" in context.summary.lower()
+    )
 
 
 def test_retriever_target_similarity(retriever):
     """Test target similarity calculation."""
     # Same target
     assert retriever._target_similarity("10.0.0.1", "10.0.0.1") == 1.0
-    
+
     # Same network
     assert retriever._target_similarity("10.0.0.1", "10.0.0.2") == 0.7
-    
+
     # Both private
     assert retriever._target_similarity("192.168.1.1", "10.0.0.1") == 0.3
-    
+
     # Different
     assert retriever._target_similarity("8.8.8.8", "10.0.0.1") == 0.0
 
@@ -371,7 +376,7 @@ def test_retriever_target_similarity(retriever):
 def test_retriever_cve_knowledge(retriever, state):
     """Test CVE knowledge retrieval."""
     state.context.high_signal_facts = ["Vulnerability: CVE-2021-44228 found"]
-    
+
     # Add CVE knowledge
     cve = CVEKnowledge(
         cve_id="CVE-2021-44228",
@@ -379,7 +384,7 @@ def test_retriever_cve_knowledge(retriever, state):
         exploit_available=True,
     )
     retriever.store.add_cve_knowledge(cve)
-    
+
     context = retriever.get_context_for_assessment("10.0.0.1", state)
     assert len(context.cve_knowledge) == 1
     assert context.cve_knowledge[0].cve_id == "CVE-2021-44228"
@@ -388,23 +393,27 @@ def test_retriever_cve_knowledge(retriever, state):
 def test_retriever_credential_patterns(retriever, state):
     """Test credential pattern retrieval."""
     state.context.high_signal_facts = ["Port 22 open: ssh", "Port 3389 open: rdp"]
-    
+
     # Add patterns
-    retriever.store.add_credential_pattern(CredentialPattern(
-        pattern_id="ssh_admin",
-        service="ssh",
-        username="admin",
-        password="admin",
-        context="default",
-    ))
-    retriever.store.add_credential_pattern(CredentialPattern(
-        pattern_id="rdp_admin",
-        service="rdp",
-        username="administrator",
-        password="password",
-        context="default",
-    ))
-    
+    retriever.store.add_credential_pattern(
+        CredentialPattern(
+            pattern_id="ssh_admin",
+            service="ssh",
+            username="admin",
+            password="admin",
+            context="default",
+        )
+    )
+    retriever.store.add_credential_pattern(
+        CredentialPattern(
+            pattern_id="rdp_admin",
+            service="rdp",
+            username="administrator",
+            password="password",
+            context="default",
+        )
+    )
+
     context = retriever.get_context_for_assessment("10.0.0.1", state)
     assert len(context.credential_patterns) >= 1
 
@@ -419,13 +428,13 @@ def test_memory_entry_wrapper(store):
         updated_at=time.time(),
         tags=["test", "wrapper"],
     )
-    
+
     assert entry.memory_type == MemoryType.SESSION_SUMMARY
     assert "test" in entry.tags
-    
+
     data = entry.to_dict()
     assert data["memory_type"] == "session_summary"
-    
+
     restored = MemoryEntry.from_dict(data)
     assert restored.entry_id == "test_1"
     assert restored.memory_type == MemoryType.SESSION_SUMMARY

@@ -556,7 +556,7 @@ def test_executor_error_handling_abort(state):
 def test_registry_scoring():
     """Test skill selection scoring."""
     # Create a skill with specific tags
-    skill = Skill(
+    _ = Skill(
         name="web-enum",
         description="Web enumeration",
         tags=["web", "enum", "quick"],
@@ -573,7 +573,7 @@ def test_registry_scoring():
 
     # Need a real loader for this
     with tempfile.TemporaryDirectory() as tmpdir:
-        skill_dir = Path(tmpdir)
+        _ = Path(tmpdir)
         # We can't easily test full registry without real skills loaded
         # This is a placeholder for when skills are in place
 

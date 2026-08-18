@@ -95,7 +95,13 @@ jobs:
       - name: Install security tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y nmap nuclei whatweb gobuster sqlmap
+          sudo apt-get install -y nmap whatweb gobuster sqlmap
+          # Install nuclei from GitHub releases (not in Ubuntu repos)
+          NUCLEI_VERSION="v3.3.7"
+          wget -q "https://github.com/projectdiscovery/nuclei/releases/download/${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION#v}_linux_amd64.zip" -O /tmp/nuclei.zip
+          unzip -q /tmp/nuclei.zip -d /tmp/nuclei
+          sudo mv /tmp/nuclei/nuclei /usr/local/bin/
+          nuclei -version
 
       - name: Run integration tests
         run: |
