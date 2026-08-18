@@ -28,8 +28,8 @@ def run(
     ),
     input_file: str = typer.Option(None, "--input", help="Input file for import"),
     confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
-    merge: bool = typer.Option(
-        True, "--merge/--replace", help="Merge with existing or replace"
+    replace: bool = typer.Option(
+        False, "--replace", help="Replace existing memory instead of merging"
     ),
 ) -> None:
     """Manage agent persistent memory."""
@@ -48,7 +48,7 @@ def run(
     elif subcommand == "export":
         _export_memory(output, type)
     elif subcommand == "import":
-        _import_memory(input_file, merge)
+        _import_memory(input_file, not replace)
     else:
         console.print(f"[red]Unknown subcommand: {subcommand}[/red]")
         console.print("Available: list, show, search, stats, clear, export, import")
