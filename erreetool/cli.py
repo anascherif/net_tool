@@ -18,6 +18,7 @@ from erreetool.commands import (
     memory,
     skill,
     api,
+    tui,
 )
 
 app = typer.Typer(
@@ -41,6 +42,7 @@ app.command("assess")(assess.run)
 app.command("memory")(memory.run)
 app.command("skill")(skill.run)
 app.command("api")(api.run)
+app.command("tui")(tui.run)
 
 
 def get_command(app):
@@ -73,6 +75,7 @@ def get_command_list():
         ("memory", "Manage agent persistent memory"),
         ("skill", "Manage pentest skills"),
         ("api", "Start REST API server"),
+        ("tui", "Launch Terminal User Interface"),
     ]
 
 

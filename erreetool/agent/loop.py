@@ -23,6 +23,8 @@ from erreetool.agent.tools.base import tool_registry, ToolResult
 from erreetool.agent.skills import SkillExecutor, SkillRegistry, skill_registry
 from erreetool.agent.memory import memory_retriever, RetrievedContext, memory_store, MemoryType, SessionSummary
 from erreetool.agent.safety import SafetyGate, SafetyPolicy, RiskLevel, ApprovalResponse, ApprovalPrompt
+from erreetool.agent.solver import SolveConfig, SolveResult, run_solve
+from erreetool.agent.tools.http_tools import TrafficStore, register_enhanced_tools
 
 console = Console()
 
@@ -35,7 +37,18 @@ class AgentConfig:
     evidence_gate_required: bool = True
     show_reasoning: bool = True
     auto_report: bool = True
-    # Skill mode
+    # Engine mode
+    engine: str = "solve"  # "solve" (model-driven) | "rounds" (legacy fixed-step) | "skill" (skill-driven)
+    # Solve engine config
+    solve_max_turns: int = 240
+    solve_auto_report: bool = True
+    context_auto_compact: bool = True
+    context_compact_trigger_ratio: float = 0.70
+    context_compact_target_ratio: float = 0.55
+    context_recent_turns: int = 12
+    context_summary_max_tokens: int = 3500
+    stall_guard_threshold: int = 5
+    # Skill mode (legacy)
     skill_mode: bool = False  # If True, run skills instead of LLM loop
     skill_names: str = ""  # Comma-separated skill names to run
     skill_mode_type: str = "auto"  # auto, quick, full
@@ -123,6 +136,12 @@ RULES:
         self.step_count = 0
         self.start_time = time.time()
         
+        # Traffic store for HTTP evidence
+        self.traffic_store = TrafficStore(state.session_id, state.output_dir)
+        
+        # Register enhanced tools
+        register_enhanced_tools(state, self.traffic_store)
+        
         # Safety gate (Phase 6)
         self.safety_gate = None
         if self.config.use_safety_gate:
@@ -142,6 +161,13 @@ RULES:
             "run_sqlmap": self._exec_sqlmap,
             "run_crypto": self._exec_crypto,
             "run_shell": self._exec_shell,
+            # Enhanced tools
+            "run_fetch": self._exec_fetch,
+            "run_http_probe_batch": self._exec_http_probe_batch,
+            "run_source_extract": self._exec_source_extract,
+            "run_runtime_diff_probe": self._exec_runtime_diff_probe,
+            "run_traffic_list": self._exec_traffic_list,
+            "run_traffic_view": self._exec_traffic_view,
         }
         
         # Skill executor (lazy init)
@@ -170,17 +196,51 @@ RULES:
             EvidenceType.OBSERVATION,
             "agent",
             f"Session started. Goal: {goal or 'Full penetration test'}",
-            {"session_id": self.state.session_id}
+            {"session_id": self.state.session_id, "engine": self.config.engine}
         )
         
         # Load relevant memory from past sessions
         self._load_memory_context(goal)
         
-        # Check if skill mode is enabled
+        # Check if skill mode is enabled (legacy)
         if self.config.skill_mode:
             return self._run_skills(goal)
         
-        # Otherwise, run the LLM-driven loop
+        # Check if solve engine mode
+        if self.config.engine == "solve":
+            return self._run_solve(goal)
+        
+        # Otherwise, run the legacy LLM-driven loop (rounds mode)
+        return self._run_rounds(goal)
+    
+    def _run_solve(self, goal: str = None) -> AgentState:
+        """Run using the solve engine (model-driven)."""
+        if not self.provider:
+            console.print("[yellow]No LLM provider available for solve engine[/yellow]")
+            return self._fallback_assessment(goal)
+        
+        solve_config = SolveConfig(
+            max_turns=self.config.solve_max_turns,
+            auto_report=self.config.solve_auto_report,
+            context_auto_compact=self.config.context_auto_compact,
+            context_compact_trigger_ratio=self.config.context_compact_trigger_ratio,
+            context_compact_target_ratio=self.config.context_compact_target_ratio,
+            context_recent_turns=self.config.context_recent_turns,
+            context_summary_max_tokens=self.config.context_summary_max_tokens,
+            stall_guard_threshold=self.config.stall_guard_threshold,
+            show_reasoning=self.config.show_reasoning,
+            use_safety_gate=self.config.use_safety_gate,
+            non_interactive=self.config.non_interactive,
+            allow_exploitation=self.config.allow_exploitation,
+            human_in_loop=self.config.human_in_loop,
+            use_memory=self.config.use_memory,
+            memory_max_sessions=self.config.memory_max_sessions,
+        )
+        
+        return run_solve(self.state, self.provider, goal, solve_config)
+    
+    def _run_rounds(self, goal: str = None) -> AgentState:
+        """Run the legacy rounds-based loop."""
         while not self._should_stop():
             self.step_count += 1
             
@@ -228,6 +288,43 @@ RULES:
             self._verify_final_claims()
         
         # Save session to memory for future assessments
+        self._save_session_to_memory()
+        
+        # Save final state
+        self.state.save()
+        return self.state
+    
+    def _fallback_assessment(self, goal: str = None) -> AgentState:
+        """Run basic assessment without LLM."""
+        from erreetool.agent.tools import tool_registry
+        
+        console.print("[dim]Running offline tools...[/dim]")
+        
+        # Run nmap
+        nmap = tool_registry.get("nmap")
+        if nmap and nmap.is_available():
+            console.print("  [cyan]Running nmap...[/cyan]")
+            result = nmap.run(target=self.state.context.target, ports="top-1000")
+            if result.success:
+                self.state.add_evidence(
+                    EvidenceType.TOOL_OUTPUT, "nmap", result.output,
+                    {"command": result.command, "duration": result.duration}
+                )
+                self._extract_facts("nmap", result.output)
+        
+        # Run nuclei
+        nuclei = tool_registry.get("nuclei")
+        if nuclei and nuclei.is_available():
+            console.print("  [cyan]Running nuclei...[/cyan]")
+            result = nuclei.run(target=self.state.context.target)
+            if result.success:
+                self.state.add_evidence(
+                    EvidenceType.TOOL_OUTPUT, "nuclei", result.output,
+                    {"command": result.command, "duration": result.duration}
+                )
+                self._extract_facts("nuclei", result.output)
+        
+        # Save session to memory
         self._save_session_to_memory()
         
         # Save final state
@@ -831,6 +928,36 @@ RULES:
             return ToolResult(success=False, stdout="", stderr=f"Timeout after {timeout}s", returncode=-1, command=[command], duration=time.time()-start, evidence_id=f"shell_{int(start)}", tool_name="shell")
         except Exception as e:
             return ToolResult(success=False, stdout="", stderr=str(e), returncode=-1, command=[command], duration=time.time()-start, evidence_id=f"shell_{int(start)}", tool_name="shell")
+    
+    def _exec_fetch(self, **kwargs) -> ToolResult:
+        from erreetool.agent.tools.http_tools import FetchTool
+        tool = FetchTool(state=self.state, traffic_store=self.traffic_store)
+        return tool.run(**kwargs)
+    
+    def _exec_http_probe_batch(self, **kwargs) -> ToolResult:
+        from erreetool.agent.tools.http_tools import HTTPProbeBatchTool
+        tool = HTTPProbeBatchTool(state=self.state, traffic_store=self.traffic_store)
+        return tool.run(**kwargs)
+    
+    def _exec_source_extract(self, **kwargs) -> ToolResult:
+        from erreetool.agent.tools.http_tools import SourceExtractTool
+        tool = SourceExtractTool(state=self.state)
+        return tool.run(**kwargs)
+    
+    def _exec_runtime_diff_probe(self, **kwargs) -> ToolResult:
+        from erreetool.agent.tools.http_tools import RuntimeDiffProbeTool
+        tool = RuntimeDiffProbeTool(state=self.state)
+        return tool.run(**kwargs)
+    
+    def _exec_traffic_list(self, **kwargs) -> ToolResult:
+        from erreetool.agent.tools.http_tools import TrafficListTool
+        tool = TrafficListTool(state=self.state, traffic_store=self.traffic_store)
+        return tool.run(**kwargs)
+    
+    def _exec_traffic_view(self, **kwargs) -> ToolResult:
+        from erreetool.agent.tools.http_tools import TrafficViewTool
+        tool = TrafficViewTool(state=self.state, traffic_store=self.traffic_store)
+        return tool.run(**kwargs)
     
     def _fallback_analysis(self) -> str:
         """Generate basic triage report without LLM."""

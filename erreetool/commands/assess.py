@@ -37,7 +37,8 @@ def run(
         False, "--interactive", "-i", help="Interactive REPL mode."
     ),
     explain: bool = typer.Option(False, "--explain", help="Show AI explanation."),
-    max_steps: int = typer.Option(30, "--max-steps", help="Maximum agent steps."),
+    max_steps: int = typer.Option(30, "--max-steps", help="Maximum agent steps (legacy rounds mode)."),
+    max_turns: int = typer.Option(240, "--max-turns", help="Maximum solve engine turns (safety budget)."),
     goal: str = typer.Option(None, "--goal", help="Specific assessment goal."),
     skill: str = typer.Option(
         None, "--skill", help="Run specific skill(s) by name (comma-separated)."
@@ -47,6 +48,12 @@ def run(
     ),
     skill_mode: str = typer.Option(
         "auto", "--skill-mode", help="Skill selection mode: auto, quick, full."
+    ),
+    engine: str = typer.Option(
+        "solve", "--engine", help="Engine mode: solve (model-driven), rounds (legacy), skill."
+    ),
+    no_report: bool = typer.Option(
+        False, "--no-report", help="Disable automatic report generation."
     ),
 ) -> None:
     """
@@ -114,20 +121,36 @@ def run(
     else:
         console.print("[yellow]Offline mode - skipping LLM calls[/yellow]")
 
-    # Initialize agent state
+# Initialize agent state
     state = AgentState()
     state.context.target = target
     state.context.goals.append(goal or f"Penetration test on {target}")
-
+    
+    # Handle Typer/Click bug: boolean flags may come as strings
+    full = bool(full)
+    quick = bool(quick)
+    offline = bool(offline)
+    interactive = bool(interactive)
+    explain = bool(explain)
+    list_skills = bool(list_skills)
+    no_report = bool(no_report)
+    
+    # Validate engine
+    if engine not in ("solve", "rounds", "skill"):
+        console.print(Panel(f"[bold red]Invalid engine: {engine}. Must be solve, rounds, or skill[/bold red]"))
+        return
+    
     # Determine mode
-    use_skill_mode = skill is not None or (provider is None and not offline and quick)
-
+    use_skill_mode = skill is not None or engine == "skill" or (provider is None and not offline and quick)
+    
     # Configure agent
     config = AgentConfig(
         max_steps=max_steps,
+        max_turns=max_turns,
         evidence_gate_required=not offline,
         show_reasoning=explain,
-        auto_report=True,
+        auto_report=not no_report,
+        engine=engine,
         skill_mode=use_skill_mode,
         skill_names=skill or "",
         skill_mode_type=skill_mode,
@@ -135,6 +158,25 @@ def run(
 
     # Create agent loop
     loop = AgentLoop(state, provider, config) if provider or use_skill_mode else None
+
+    if interactive:
+        # Launch REPL
+        console.print("[cyan]Starting interactive mode...[/cyan]")
+        from erreetool.interfaces.repl import run_repl
+
+        run_repl(target=target, config=config)
+        return
+    
+    # Handle offline mode with solve engine
+    if not provider and engine == "solve":
+        console.print("[yellow]Solve engine requires LLM provider, falling back to rounds mode[/yellow]")
+        config.engine = "rounds"
+        if provider is None:
+            loop = AgentLoop(state, None, config) if use_skill_mode else None
+        else:
+            loop = AgentLoop(state, provider, config)
+    elif not provider and not use_skill_mode:
+        loop = None
 
     if interactive:
         # Launch REPL

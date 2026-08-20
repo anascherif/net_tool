@@ -9,6 +9,16 @@ from erreetool.agent.tools.whatweb import WhatWebWrapper
 from erreetool.agent.tools.gobuster import GobusterWrapper, FeroxbusterWrapper
 from erreetool.agent.tools.sqlmap import SQLMapWrapper
 from erreetool.agent.tools.crypto import CryptoWrapper, CryptoTool
+from erreetool.agent.tools.http_tools import (
+    FetchTool,
+    HTTPProbeBatchTool,
+    SourceExtractTool,
+    RuntimeDiffProbeTool,
+    TrafficListTool,
+    TrafficViewTool,
+    TrafficStore,
+    register_enhanced_tools
+)
 
 __all__ = [
     "ToolWrapper",
@@ -23,4 +33,12 @@ __all__ = [
     "SQLMapWrapper",
     "CryptoWrapper",
     "CryptoTool",
+    "FetchTool",
+    "HTTPProbeBatchTool",
+    "SourceExtractTool",
+    "RuntimeDiffProbeTool",
+    "TrafficListTool",
+    "TrafficViewTool",
+    "TrafficStore",
+    "register_enhanced_tools",
 ]
